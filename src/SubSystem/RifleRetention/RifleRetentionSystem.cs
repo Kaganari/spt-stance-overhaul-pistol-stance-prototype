@@ -1,0 +1,531 @@
+using EFT;
+using EFT.InventoryLogic;
+using RealismCommonLib.Events;
+using StanceOverhaul.SubSystem.StanceInput;
+using UnityEngine;
+using static RealismCommonLib.Plugin;
+
+namespace StanceOverhaul.SubSystem.RifleRetention
+{
+    /// <summary>
+    /// PROTOTYPE: rifle-retained pistol transition.
+    ///
+    /// On keypress a <see cref="RetainedRifleCopy"/> is spawned exactly where the held rifle is, the real
+    /// rifle is hidden, its "put away" animation is skipped so the pistol draw starts immediately, and
+    /// the copy drops from the held pose to the Patrol stance pose (+ tweaks). Returning reverses it: the
+    /// copy rises while the game draws the hidden real rifle (draw animation skipped too), and the copy is
+    /// swapped for the real rifle once it has settled onto it.
+    /// </summary>
+    internal class RifleRetentionSystem : ISubSystem
+    {
+        private enum ERetentionState
+        {
+            Idle,
+            Lowering,   // copy dropping, game swapping rifle -> pistol
+            Retained,   // pistol ready, copy held low
+            Raising     // copy rising, game swapping pistol -> rifle
+        }
+
+        private const float SWAP_TIMEOUT = 5f;
+
+        // Skip windows, armed right before the slot request. Spawn is longer: the pistol holster
+        // animation plays before the rifle is spawned.
+        private const float SKIP_REMOVE_WINDOW = 1.5f;
+        private const float SKIP_SPAWN_WINDOW = 4f;
+
+        // Raising: the real rifle is trusted after being drawn and idle for a few frames, then the copy
+        // settles onto its live pose and is swapped for it.
+        private const int REAL_POSE_MIN_FRAMES = 2;
+        private const float SETTLE_SHARPNESS = 25f;
+        private const float SETTLE_POS_EPSILON = 0.004f;
+        private const float SETTLE_ANGLE_EPSILON = 1f;
+        private const float SETTLE_MAX_TIME = 0.3f;
+
+        private const float POST_REVEAL_TRACE_TIME = 1f;
+
+        private static RifleRetentionSystem? _instance;
+        private static Weapon? _skipRemoveFor;
+        private static float _skipRemoveUntil;
+        private static Weapon? _skipSpawnFor;
+        private static float _skipSpawnUntil;
+
+        private ERetentionState _state = ERetentionState.Idle;
+        private Weapon? _rifle;
+        private Weapon? _pistol;
+        private EquipmentSlot _rifleSlot;
+        private RetainedRifleCopy? _copy;
+        private ECharacterWeaponBones _anchorBone = ECharacterWeaponBones.weapon;
+        private readonly HeldWeaponHider _hider = new HeldWeaponHider();
+        private readonly PatrolPoseSolver _patrolPose = new PatrolPoseSolver();
+        private Player.FirearmController.SpawnOperation? _pendingSpawnSkip;
+        private bool _ignoreSwapInput;
+        private bool _pistolAppeared;
+        private float _swapTimer;
+        private float _blend; // 0 = held pose, 1 = lowered pose
+
+        // Held rifle pose in retention space, captured on keypress.
+        private Vector3 _heldPosition;
+        private Quaternion _heldRotation;
+
+        private bool _realRifleReady;
+        private int _realPosedFrames;
+        private float _settleTimer;
+        private Vector3 _smoothedPosition;
+        private Quaternion _smoothedRotation;
+
+        private float _postRevealTraceUntil;
+
+        public bool IsActive => _state != ERetentionState.Idle;
+
+        /// <summary>Read by the IK patch: keep the left arm on the copy even when the swap animation frees the hand.</summary>
+        public bool ForceLeftHandIK => _state != ERetentionState.Idle && _copy?.LeftGrip != null;
+
+        public void RunOnAwake()
+        {
+            _instance = this;
+            StanceInputEvents.ToggleRifleRetention += OnToggle;
+            InputEvents.WeaponSwapInput += OnManualSwap;
+        }
+
+        public void RunOnDestroy()
+        {
+            StanceInputEvents.ToggleRifleRetention -= OnToggle;
+            InputEvents.WeaponSwapInput -= OnManualSwap;
+            Cleanup("subsystem destroyed");
+            if (_instance == this) _instance = null;
+        }
+
+        public void RunOnUpdate(float deltaTime)
+        {
+            if (_state == ERetentionState.Idle)
+            {
+                if (RifleRetentionDebug.Enabled && Time.time < _postRevealTraceUntil)
+                    RifleRetentionDebug.TraceFrame("post-reveal", "Idle", 0f, true, null, _anchorBone);
+                return;
+            }
+
+            // Safety: the game resets its FOV squash at end of frame; never carry ours into a new frame.
+            _copy?.UndoFovSquash();
+
+            if (_pendingSpawnSkip != null)
+                RunPendingSpawnSkip();
+
+            Player player = PlayerStateInstance.Player;
+            if (player == null || _copy == null || !_copy.IsAlive || !RifleStillEquipped(player))
+            {
+                Cleanup(player == null ? "no player" : _copy == null || !_copy.IsAlive ? "copy missing" : "rifle no longer in its slot");
+                return;
+            }
+
+            var handsController = player.HandsController;
+            Item? inHands = handsController?.Item;
+            bool rifleInHands = ReferenceEquals(inHands, _rifle);
+            bool pistolInHands = ReferenceEquals(inHands, _pistol);
+            // Between two hands controllers the hands can briefly hold neither weapon. That is part of
+            // the swap, not a cancel: rely on the timeout and on OnManualSwap for real cancels.
+            bool somethingElseInHands = inHands != null && !rifleInHands && !pistolInHands;
+
+            bool stillActive;
+            switch (_state)
+            {
+                case ERetentionState.Lowering:
+                    stillActive = UpdateLowering(handsController, rifleInHands, pistolInHands, somethingElseInHands, inHands, deltaTime);
+                    break;
+                case ERetentionState.Retained:
+                    stillActive = UpdateRetained(pistolInHands, inHands, deltaTime);
+                    break;
+                default:
+                    stillActive = UpdateRaising(handsController, rifleInHands, somethingElseInHands, inHands, deltaTime);
+                    break;
+            }
+            if (!stillActive) return;
+
+            UpdatePose(player, deltaTime);
+
+            // Every frame while moving; every 15th while retained.
+            if (RifleRetentionDebug.Enabled && (_state != ERetentionState.Retained || Time.frameCount % 15 == 0))
+                RifleRetentionDebug.TraceFrame("frame", _state.ToString(), _blend, _realRifleReady, _copy.Anchor, _anchorBone, _copy.LastReachClampMm);
+
+            if (_state == ERetentionState.Raising)
+                TryReveal(deltaTime);
+        }
+
+        private bool UpdateLowering(Player.AbstractHandsController? handsController, bool rifleInHands, bool pistolInHands,
+            bool somethingElseInHands, Item? inHands, float deltaTime)
+        {
+            _swapTimer += deltaTime;
+            if (_swapTimer > SWAP_TIMEOUT || somethingElseInHands)
+            {
+                Cleanup(_swapTimer > SWAP_TIMEOUT ? "lowering timeout" : "lowering: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                return false;
+            }
+
+            if (rifleInHands)
+            {
+                _hider.Hide(handsController!.ControllerGameObject);
+            }
+            else if (pistolInHands)
+            {
+                // The rifle's first-person object is gone (pooled); give its renderers back.
+                _hider.RestoreAll();
+                // Not WeaponIsReady alone: it can still be true from the rifle (seen at f0 in logs).
+                if (_pistolAppeared || IsDrawnAndIdle(handsController))
+                    SetState(ERetentionState.Retained, _pistolAppeared ? "pistol draw completed" : "pistol idle");
+            }
+
+            _blend = Mathf.MoveTowards(_blend, 1f, deltaTime * PluginConfig.RifleRetentionBlendSpeed.Value);
+            return true;
+        }
+
+        private bool UpdateRetained(bool pistolInHands, Item? inHands, float deltaTime)
+        {
+            if (!pistolInHands)
+            {
+                Cleanup("retained: pistol left hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                return false;
+            }
+
+            _blend = Mathf.MoveTowards(_blend, 1f, deltaTime * PluginConfig.RifleRetentionBlendSpeed.Value);
+            return true;
+        }
+
+        private bool UpdateRaising(Player.AbstractHandsController? handsController, bool rifleInHands,
+            bool somethingElseInHands, Item? inHands, float deltaTime)
+        {
+            _swapTimer += deltaTime;
+            if (_swapTimer > SWAP_TIMEOUT || somethingElseInHands)
+            {
+                Cleanup(_swapTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                return false;
+            }
+
+            // Don't park on the pose saved at keypress while the pistol holsters: the real rifle comes
+            // back ~1cm / 1deg off it and then settles into its idle (logs). Ease toward just short of
+            // the top instead, and finish the rise onto the real rifle's live pose once it is trusted,
+            // so the correction happens mid-motion.
+            if (_realRifleReady)
+                _blend = Mathf.MoveTowards(_blend, 0f, deltaTime * PluginConfig.RifleRetentionRaiseFinalSpeed.Value);
+            else
+                _blend = Mathf.Lerp(_blend, PluginConfig.RifleRetentionRaiseHoldPoint.Value,
+                    1f - Mathf.Exp(-PluginConfig.RifleRetentionRaiseSpeed.Value * deltaTime));
+
+            if (!rifleInHands) return true;
+
+            // The copy stands in for the real rifle until it has settled onto it.
+            _hider.Hide(handsController!.ControllerGameObject);
+
+            // Keep the hidden rifle at rest: no previous-weapon stance (PistolCompress) easing out on it,
+            // no spring tails. Logs showed ~4cm / 9deg of drift over ~0.45s without this.
+            var stances = Plugin.StanceControllerInstance;
+            if (stances != null && stances.AwakeRan)
+                stances.SnapStanceToRestForRetention();
+
+            // Right after the fast-forward the animator is not posed yet and the weapon bone reports a
+            // junk pose for a frame: only trust the real rifle after it has been drawn and idle for a bit.
+            bool posed = PlayerStateInstance.WeaponIsReady && IsDrawnAndIdle(handsController);
+            _realPosedFrames = posed ? _realPosedFrames + 1 : 0;
+            bool wasReady = _realRifleReady;
+            _realRifleReady = _realPosedFrames >= REAL_POSE_MIN_FRAMES;
+            if (_realRifleReady && !wasReady)
+                RifleRetentionDebug.Log($"real rifle trusted after {_realPosedFrames} posed frames");
+            return true;
+        }
+
+        /// <summary>Swaps the copy for the real rifle once the copy has settled onto it (or after a timeout).</summary>
+        private void TryReveal(float deltaTime)
+        {
+            if (!_realRifleReady || _blend > 0f || !TrySampleRealRiflePose(out Vector3 realPos, out Quaternion realRot))
+                return;
+
+            _settleTimer += deltaTime;
+            float distance = Vector3.Distance(_smoothedPosition, realPos);
+            float angle = Quaternion.Angle(_smoothedRotation, realRot);
+            bool settled = distance < SETTLE_POS_EPSILON && angle < SETTLE_ANGLE_EPSILON;
+            RifleRetentionDebug.Log($"settle check: t={_settleTimer:F3} d={distance * 1000f:F1}mm/{angle:F1}deg settled={settled}");
+
+            // Cleanup reveals the real rifle in the same frame the copy goes away.
+            if (settled || _settleTimer > SETTLE_MAX_TIME)
+                Cleanup(settled ? "REVEAL settled" : "REVEAL settle timeout");
+        }
+
+        private void UpdatePose(Player player, float deltaTime)
+        {
+            float eased = Mathf.SmoothStep(0f, 1f, _blend);
+
+            // Re-evaluated every frame: picks up tweak slider changes.
+            if (!_patrolPose.TryEvaluate(out Vector3 loweredPos, out Quaternion loweredRot))
+            {
+                loweredPos = _heldPosition;
+                loweredRot = _heldRotation;
+            }
+
+            // "Up" end of the travel: where the rifle was held or, when raising and the real rifle is
+            // already in hands, exactly where it actually is (it comes back in idle, not the old stance).
+            Vector3 upPos = _heldPosition;
+            Quaternion upRot = _heldRotation;
+            if (_state == ERetentionState.Raising && _realRifleReady && TrySampleRealRiflePose(out Vector3 realPos, out Quaternion realRot))
+            {
+                upPos = realPos;
+                upRot = realRot;
+            }
+
+            Vector3 pos = Vector3.Lerp(upPos, loweredPos, eased);
+            Quaternion rot = Quaternion.Slerp(upRot, loweredRot, eased);
+
+            if (_state == ERetentionState.Raising)
+            {
+                // Smooth out the retarget from the saved to the real pose instead of snapping.
+                float t = 1f - Mathf.Exp(-SETTLE_SHARPNESS * deltaTime);
+                _smoothedPosition = Vector3.Lerp(_smoothedPosition, pos, t);
+                _smoothedRotation = Quaternion.Slerp(_smoothedRotation, rot, t);
+                pos = _smoothedPosition;
+                rot = _smoothedRotation;
+            }
+
+            _copy!.SetLocalPose(pos, rot);
+            _copy.ClampToArmReach(player, eased);
+            _copy.HoldWithLeftHand(player);
+        }
+
+        private bool TrySampleRealRiflePose(out Vector3 position, out Quaternion rotation)
+        {
+            return RetentionSpace.TryGetLocalPose(RetentionSpace.HeldWeaponBone(_anchorBone), out position, out rotation);
+        }
+
+        /// <summary>
+        /// The weapon in hands has finished its draw and its animator is in idle, i.e. its bones are
+        /// actually posed. On the frame of a fast-forwarded draw the animator is not idle yet and the
+        /// weapon bone reports a junk pose (241mm / ~90deg off in logs).
+        /// </summary>
+        private static bool IsDrawnAndIdle(Player.AbstractHandsController? handsController)
+        {
+            if (!(handsController is Player.FirearmController fc)) return false;
+            var op = fc.CurrentOperation;
+            if (op == null || op is Player.FirearmController.SpawnOperation) return false;
+            return op.FirearmsAnimator != null && op.FirearmsAnimator.IsIdling();
+        }
+
+        private void OnToggle()
+        {
+            if (!PluginConfig.EnableRifleRetention.Value) return;
+
+            RifleRetentionDebug.MarkKeypress();
+            Player player = PlayerStateInstance.Player;
+            RifleRetentionDebug.Log($"KEYPRESS state={_state} hands={RifleRetentionDebug.Name(player?.HandsController?.Item)} " +
+                $"treatAsPistol={WeaponStateInstance.TreatAsPistol} weaponIsReady={PlayerStateInstance.WeaponIsReady}");
+
+            if (_state == ERetentionState.Idle)
+                TryStartRetention();
+            else if (_state == ERetentionState.Retained)
+                StartRaising();
+        }
+
+        private void OnManualSwap()
+        {
+            // The player picked another slot themselves: drop the illusion right away.
+            if (_ignoreSwapInput || _state == ERetentionState.Idle) return;
+            Cleanup("manual weapon swap input");
+        }
+
+        private void TryStartRetention()
+        {
+            Player player = PlayerStateInstance.Player;
+            if (player == null || !player.IsYourPlayer) return;
+            if (WeaponStateInstance.TreatAsPistol) return;
+            if (!(player.HandsController?.Item is Weapon rifle)) return;
+            if (!TryGetRifleSlot(player.Equipment, rifle, out EquipmentSlot rifleSlot)) return;
+            if (!(player.Equipment.GetSlot(EquipmentSlot.Holster).ContainedItem is Weapon pistol)) return;
+
+            Transform? space = RetentionSpace.Root;
+            Transform? heldBone = RetentionSpace.HeldWeaponBone(ECharacterWeaponBones.weapon);
+            if (space == null || heldBone == null) return;
+
+            _rifle = rifle;
+            _pistol = pistol;
+            _rifleSlot = rifleSlot;
+            RetentionSpace.TryGetLocalPose(heldBone, out _heldPosition, out _heldRotation);
+
+            _copy = RetainedRifleCopy.Spawn(player, rifle, space, heldBone, _heldPosition, _heldRotation);
+            if (_copy == null)
+            {
+                Cleanup("copy spawn failed");
+                return;
+            }
+            _anchorBone = _copy.AnchorBone;
+            _patrolPose.Capture(space, heldBone);
+
+            _hider.Hide(player.HandsController?.ControllerGameObject);
+            _blend = 0f;
+            _swapTimer = 0f;
+            SetState(ERetentionState.Lowering, "keypress");
+            UpdatePose(player, 0f);
+
+            _pistolAppeared = false;
+            _skipRemoveFor = rifle;
+            _skipRemoveUntil = Time.time + SKIP_REMOVE_WINDOW;
+            RequestSlot(player, EquipmentSlot.Holster);
+        }
+
+        private static bool TryGetRifleSlot(InventoryEquipment equipment, Weapon rifle, out EquipmentSlot slot)
+        {
+            var container = rifle.CurrentAddress?.Container;
+            slot = EquipmentSlot.FirstPrimaryWeapon;
+            if (ReferenceEquals(container, equipment.GetSlot(EquipmentSlot.FirstPrimaryWeapon)))
+                return true;
+
+            slot = EquipmentSlot.SecondPrimaryWeapon;
+            return ReferenceEquals(container, equipment.GetSlot(EquipmentSlot.SecondPrimaryWeapon));
+        }
+
+        private void StartRaising()
+        {
+            Player player = PlayerStateInstance.Player;
+            if (player == null) return;
+
+            _swapTimer = 0f;
+            _settleTimer = 0f;
+            _realRifleReady = false;
+            _realPosedFrames = 0;
+            _smoothedPosition = _copy!.Anchor.localPosition;
+            _smoothedRotation = _copy.Anchor.localRotation;
+            SetState(ERetentionState.Raising, "keypress");
+
+            _skipSpawnFor = _rifle;
+            _skipSpawnUntil = Time.time + SKIP_SPAWN_WINDOW;
+            RequestSlot(player, _rifleSlot);
+        }
+
+        private void RequestSlot(Player player, EquipmentSlot slot)
+        {
+            // Normal (non-quickdraw) swap: separate from the game's fast pistol draw and its stamina cost.
+            player.FastSlotSelection = false;
+            RifleRetentionDebug.Log($"RequestSlot {slot} (contains {RifleRetentionDebug.Name(player.Equipment.GetSlot(slot).ContainedItem)})");
+            _ignoreSwapInput = true;
+            try
+            {
+                player.SetSlotItem(slot, result => { });
+            }
+            finally
+            {
+                _ignoreSwapInput = false;
+            }
+        }
+
+        private bool RifleStillEquipped(Player player)
+        {
+            return ReferenceEquals(player.Equipment.GetSlot(_rifleSlot).ContainedItem, _rifle);
+        }
+
+        private void SetState(ERetentionState newState, string reason)
+        {
+            if (newState != _state)
+            {
+                RifleRetentionDebug.Log($"STATE {_state} -> {newState} ({reason}) blend={_blend:F3} hidden={_hider.Count}");
+                if (_state == ERetentionState.Raising && newState == ERetentionState.Idle)
+                    _postRevealTraceUntil = Time.time + POST_REVEAL_TRACE_TIME;
+            }
+            _state = newState;
+        }
+
+        private void Cleanup(string reason)
+        {
+            _skipRemoveFor = null;
+            _skipSpawnFor = null;
+            _pendingSpawnSkip = null;
+            _realRifleReady = false;
+            _realPosedFrames = 0;
+            _pistolAppeared = false;
+            _settleTimer = 0f;
+            _patrolPose.Reset();
+            _hider.RestoreAll();
+
+            _copy?.Destroy(PlayerStateInstance.Player);
+            _copy = null;
+
+            _rifle = null;
+            _pistol = null;
+            _blend = 0f;
+            _swapTimer = 0f;
+            SetState(ERetentionState.Idle, reason);
+        }
+
+        // ---- Entry points for RifleRetentionPatches ----
+
+        /// <summary>
+        /// Remove.Start postfix. True once for the rifle being retained, so its "put the rifle away"
+        /// animation is fast-forwarded and the pistol draw starts immediately.
+        /// </summary>
+        internal static bool ConsumeSkipRemove(Player player, Weapon weapon)
+        {
+            if (player == null || !player.IsYourPlayer) return false;
+
+            RifleRetentionDebug.Log($"Remove.Start weapon={RifleRetentionDebug.Name(weapon)} " +
+                $"armedFor={RifleRetentionDebug.Name(_skipRemoveFor)} windowLeft={_skipRemoveUntil - Time.time:F2}s");
+
+            if (_skipRemoveFor == null || !ReferenceEquals(weapon, _skipRemoveFor) || Time.time > _skipRemoveUntil) return false;
+            _skipRemoveFor = null;
+            RifleRetentionDebug.Log("  -> remove skipped (FastForward)");
+            return true;
+        }
+
+        /// <summary>
+        /// SpawnOperation.Start postfix, for the rifle being raised back: hides its model right away, before
+        /// it can render a single frame, and defers the fast-forward to the next Update so the game's swap
+        /// code has fully returned first.
+        /// </summary>
+        internal static void ConsumeSkipSpawn(Player.FirearmController.SpawnOperation operation)
+        {
+            Player player = operation.Player;
+            if (player == null || !player.IsYourPlayer || _instance == null) return;
+
+            RifleRetentionDebug.Log($"SpawnOperation.Start weapon={RifleRetentionDebug.Name(operation.Weapon)} " +
+                $"armedFor={RifleRetentionDebug.Name(_skipSpawnFor)} windowLeft={_skipSpawnUntil - Time.time:F2}s");
+
+            if (_skipSpawnFor == null || !ReferenceEquals(operation.Weapon, _skipSpawnFor) || Time.time > _skipSpawnUntil) return;
+            _skipSpawnFor = null;
+            _instance._hider.Hide(operation.Controller.ControllerGameObject);
+            _instance._pendingSpawnSkip = operation;
+            RifleRetentionDebug.Log($"  -> spawn skip armed (fast-forward next frame), hidden renderers={_instance._hider.Count}");
+        }
+
+        private void RunPendingSpawnSkip()
+        {
+            var operation = _pendingSpawnSkip;
+            _pendingSpawnSkip = null;
+            if (operation == null || !ReferenceEquals(operation.Weapon, _rifle)) return;
+
+            // The draw animation is what normally fires this (chambering a round from the magazine on
+            // draw); fire it ourselves so the ammo state matches. No-op when nothing was chambered.
+            operation.OnAddAmmoInChamber();
+            // Jumps the animator to idle and completes the draw (WeaponAppeared). No-op if already finished.
+            operation.FastForward();
+
+            RifleRetentionDebug.Log($"spawn skip run: op state={operation.State} animIdle={operation.FirearmsAnimator?.IsIdling()} " +
+                $"currentOp={operation.Controller.CurrentOperation?.GetType().Name} weaponIsReady={PlayerStateInstance.WeaponIsReady}");
+        }
+
+        /// <summary>
+        /// SpawnOperation.WeaponAppeared postfix: a local firearm draw has really completed. Lowering waits
+        /// for this for the pistol: RealismCommonLib's WeaponIsReady can still be true from the rifle.
+        /// </summary>
+        internal static void OnWeaponAppeared(Player.FirearmController.SpawnOperation operation)
+        {
+            if (operation.Player == null || !operation.Player.IsYourPlayer || _instance == null) return;
+
+            RifleRetentionDebug.Log($"WeaponAppeared weapon={RifleRetentionDebug.Name(operation.Weapon)} state={_instance._state}");
+            if (ReferenceEquals(operation.Weapon, _instance._pistol))
+                _instance._pistolAppeared = true;
+        }
+
+        internal static void OnFovAdjustmentsApplied(Player player)
+        {
+            if (player != null && player.IsYourPlayer)
+                _instance?._copy?.ApplyFovSquash(player);
+        }
+
+        internal static void OnFovAdjustmentsReset()
+        {
+            _instance?._copy?.UndoFovSquash();
+        }
+    }
+}

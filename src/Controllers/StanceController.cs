@@ -9,6 +9,7 @@ using StanceOverhaul.Enums;
 using StanceOverhaul.SubSystem.Aiming;
 using StanceOverhaul.SubSystem.StanceInput;
 using StanceOverhaul.SubSystem.Animator;
+using StanceOverhaul.SubSystem.RifleRetention;
 using StanceOverhaul.Stances;
 using StanceOverhaul.State;
 using StanceOverhaul.Events;
