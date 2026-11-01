@@ -93,9 +93,7 @@ namespace StanceOverhaul.SubSystem
         private const float SETTLE_POS_EPSILON = 0.004f;
         private const float SETTLE_ANGLE_EPSILON = 1f;
         private const float SETTLE_MAX_TIME = 0.3f;
-        private const int REAL_POSE_MIN_FRAMES = 2;
-        private const float RAISE_HOLD_BLEND = 0.2f; // how far short of the top the copy waits for the real rifle
-        private bool _realRifleReady;
+        private const int REAL_POSE_MIN_FRAMES = 2;        private bool _realRifleReady;
         private int _realPosedFrames;
         private bool _stanceSnapLogged;
         private float _settleTimer;
@@ -300,15 +298,15 @@ namespace StanceOverhaul.SubSystem
                         Cleanup(_swapTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
                         return;
                     }
-                    float raiseSpeed = PluginConfig.RifleRetentionBlendSpeed.Value;
                     if (_realRifleReady)
-                        _blend = Mathf.MoveTowards(_blend, 0f, deltaTime * raiseSpeed);
+                        _blend = Mathf.MoveTowards(_blend, 0f, deltaTime * PluginConfig.RifleRetentionRaiseFinalSpeed.Value);
                     else
                         // Don't park on the pose saved at keypress while the pistol holsters: the real
                         // rifle comes back ~1cm / 1deg off it and then settles into its idle (logs).
                         // Ease toward just short of the top instead, and finish the rise onto the
                         // real rifle's live pose once it is trusted, so the correction is mid-motion.
-                        _blend = Mathf.Lerp(_blend, RAISE_HOLD_BLEND, 1f - Mathf.Exp(-raiseSpeed * deltaTime));
+                        _blend = Mathf.Lerp(_blend, PluginConfig.RifleRetentionRaiseHoldPoint.Value,
+                            1f - Mathf.Exp(-PluginConfig.RifleRetentionRaiseSpeed.Value * deltaTime));
                     if (rifleInHands)
                     {
                         // The copy stands in for the real rifle until it has settled onto it.
