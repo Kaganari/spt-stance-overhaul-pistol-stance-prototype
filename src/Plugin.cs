@@ -47,6 +47,7 @@ namespace StanceOverhaul
             new RetentionLeftHandIKPatch().Enable();
             new RetentionSkipRifleRemovePatch().Enable();
             new RetentionSkipRifleSpawnPatch().Enable();
+            new RetentionDebugWeaponAppearedPatch().Enable();
             new PropSoundPatch().Enable();
             new LerpCameraPatch().Enable();
             new VisualPassPatch().Enable();

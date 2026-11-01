@@ -140,6 +140,21 @@ namespace StanceOverhaul.Patches
         }
     }
 
+    /// <summary>Debug only (no behaviour change): logs when a local firearm draw completes.</summary>
+    public class RetentionDebugWeaponAppearedPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(Player.FirearmController.SpawnOperation), nameof(Player.FirearmController.SpawnOperation.WeaponAppeared));
+        }
+
+        [PatchPostfix]
+        private static void Postfix(Player.FirearmController.SpawnOperation __instance)
+        {
+            StanceOverhaul.SubSystem.RifleRetentionSystem.OnWeaponAppearedDebug(__instance);
+        }
+    }
+
     public class ElbowIKPatch : ModulePatch
     {
         private static FieldInfo _iKArrayField;
