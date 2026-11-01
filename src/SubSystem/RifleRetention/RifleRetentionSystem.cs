@@ -2,6 +2,7 @@ using EFT;
 using EFT.InventoryLogic;
 using RealismCommonLib.Events;
 using StanceOverhaul.SubSystem.StanceInput;
+using System.Collections.Generic;
 using UnityEngine;
 using static RealismCommonLib.Plugin;
 
@@ -57,6 +58,18 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private ECharacterWeaponBones _anchorBone = ECharacterWeaponBones.weapon;
         private readonly HeldWeaponHider _hider = new HeldWeaponHider();
         private readonly PatrolPoseSolver _patrolPose = new PatrolPoseSolver();
+
+        // What happens to two-handed weapon actions while retaining. Swap an entry to change one action.
+        private readonly Dictionary<ERetentionAction, IRetentionActionPolicy> _actionPolicies = new Dictionary<ERetentionAction, IRetentionActionPolicy>
+        {
+            { ERetentionAction.Reload, BlockActionPolicy.Instance },
+            { ERetentionAction.CheckAmmo, BlockActionPolicy.Instance },
+            { ERetentionAction.CheckChamber, BlockActionPolicy.Instance },
+            { ERetentionAction.UnloadChamber, BlockActionPolicy.Instance },
+            { ERetentionAction.InspectWeapon, BlockActionPolicy.Instance },
+            { ERetentionAction.ClearMalfunction, BlockActionPolicy.Instance },
+        };
+
         private Player.FirearmController.SpawnOperation? _pendingSpawnSkip;
         private bool _ignoreSwapInput;
         private bool _pistolAppeared;
@@ -515,6 +528,17 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             RifleRetentionDebug.Log($"WeaponAppeared weapon={RifleRetentionDebug.Name(operation.Weapon)} state={_instance._state}");
             if (ReferenceEquals(operation.Weapon, _instance._pistol))
                 _instance._pistolAppeared = true;
+        }
+
+        /// <summary>
+        /// Two-handed action patches, for the local player's hands only. False refuses the action; while
+        /// retaining (any phase) the decision is left to that action's policy.
+        /// </summary>
+        internal static bool AllowAction(ERetentionAction action, Player.FirearmController controller)
+        {
+            if (_instance == null || !_instance.IsActive) return true;
+            if (!_instance._actionPolicies.TryGetValue(action, out IRetentionActionPolicy policy)) return true;
+            return policy.CanStart(action, controller);
         }
 
         internal static void OnFovAdjustmentsApplied(Player player)

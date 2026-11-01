@@ -1,4 +1,5 @@
 using EFT;
+using EFT.InputSystem;
 using EFT.InventoryLogic;
 using HarmonyLib;
 using RootMotion.FinalIK;
@@ -6,6 +7,7 @@ using SPT.Reflection.Patching;
 using StanceOverhaul.SubSystem.RifleRetention;
 using System;
 using System.Reflection;
+using static RealismCommonLib.Plugin;
 using static StanceOverhaul.Plugin;
 
 namespace StanceOverhaul.Patches
@@ -94,6 +96,88 @@ namespace StanceOverhaul.Patches
         private static void Postfix(Player.FirearmController.SpawnOperation __instance)
         {
             RifleRetentionSystem.OnWeaponAppeared(__instance);
+        }
+    }
+
+    /// <summary>
+    /// Two-handed weapon actions started from keybinds. The translator turns key presses into hands
+    /// actions, so this catches them before any animation starts, including the paths that skip
+    /// CanStartReload (reload with no spare magazine chambers a loose round instead). What to do while
+    /// the rifle is retained is up to the retention system's per-action policy.
+    /// </summary>
+    public class RetentionWeaponActionInputPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(FirearmHandsInputTranslator), nameof(FirearmHandsInputTranslator.TranslateCommand));
+        }
+
+        [PatchPrefix]
+        private static bool Prefix(FirearmHandsInputTranslator __instance, ECommand command, ref InputNode.ETranslateResult __result)
+        {
+            if (!(__instance._controller is Player.FirearmController controller)
+                || !ReferenceEquals(controller, PlayerStateInstance.Player?.HandsController))
+                return true;
+
+            ERetentionAction? action = ToAction(command, controller);
+            if (action == null || RifleRetentionSystem.AllowAction(action.Value, controller))
+                return true;
+
+            // TranslateCommand always reports Ignore for these commands, so skipping it changes nothing else.
+            __result = InputNode.ETranslateResult.Ignore;
+            return false;
+        }
+
+        private static ERetentionAction? ToAction(ECommand command, Player.FirearmController controller)
+        {
+            bool malfunctioned = controller.Item.MalfState.State != Weapon.EMalfunctionState.None;
+            switch (command)
+            {
+                case ECommand.ReloadWeapon:
+                case ECommand.QuickReloadWeapon:
+                    return ERetentionAction.Reload;
+                case ECommand.CheckAmmo:
+                    return ERetentionAction.CheckAmmo;
+                case ECommand.CheckChamber:
+                    // With a known malfunction this starts the repair.
+                    return malfunctioned ? ERetentionAction.ClearMalfunction : ERetentionAction.CheckChamber;
+                case ECommand.ChamberUnload:
+                    return ERetentionAction.UnloadChamber;
+                case ECommand.ExamineWeapon:
+                    return ERetentionAction.InspectWeapon;
+                case ECommand.ChangeWeaponMode:
+                case ECommand.ForceAutoWeaponMode:
+                    // Only while malfunctioned: then the fire mode keys examine the malfunction instead.
+                    return malfunctioned ? ERetentionAction.ClearMalfunction : (ERetentionAction?)null;
+                default:
+                    return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Every reload path asks CanStartReload first, including the ones that don't come from a keybind
+    /// (inventory drag-and-drop of a magazine or ammo onto the weapon in hands).
+    /// </summary>
+    public class RetentionReloadPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(Player.FirearmController), nameof(Player.FirearmController.CanStartReload));
+        }
+
+        [PatchPrefix]
+        private static bool Prefix(Player.FirearmController __instance, ref bool __result)
+        {
+            // Bots and other players go through this too: only the local player's hands are affected.
+            if (!ReferenceEquals(__instance, PlayerStateInstance.Player?.HandsController))
+                return true;
+
+            if (RifleRetentionSystem.AllowAction(ERetentionAction.Reload, __instance))
+                return true;
+
+            __result = false;
+            return false;
         }
     }
 

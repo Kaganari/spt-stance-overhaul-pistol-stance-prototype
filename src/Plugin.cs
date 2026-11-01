@@ -48,6 +48,8 @@ namespace StanceOverhaul
             new RetentionSkipRifleRemovePatch().Enable();
             new RetentionSkipRifleSpawnPatch().Enable();
             new RetentionWeaponAppearedPatch().Enable();
+            new RetentionReloadPatch().Enable();
+            new RetentionWeaponActionInputPatch().Enable();
             new RetentionFovApplyPatch().Enable();
             new RetentionFovResetPatch().Enable();
             new PropSoundPatch().Enable();
