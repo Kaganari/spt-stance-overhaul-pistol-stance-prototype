@@ -2,10 +2,13 @@ using Comfort.Common;
 using EFT;
 using EFT.AssetsManager;
 using EFT.InventoryLogic;
+using HarmonyLib;
+using RootMotion.FinalIK;
 using RealismCommonLib.Events;
 using StanceOverhaul.SubSystem.StanceInput;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using UnityEngine;
 using static RealismCommonLib.Plugin;
 
@@ -90,7 +93,10 @@ namespace StanceOverhaul.SubSystem
         private const float SETTLE_POS_EPSILON = 0.004f;
         private const float SETTLE_ANGLE_EPSILON = 1f;
         private const float SETTLE_MAX_TIME = 0.3f;
+        private const int REAL_POSE_MIN_FRAMES = 2;
         private bool _realRifleReady;
+        private int _realPosedFrames;
+        private bool _stanceSnapLogged;
         private float _settleTimer;
         private Vector3 _smoothedLocalPosition;
         private Quaternion _smoothedLocalRotation;
@@ -175,13 +181,20 @@ namespace StanceOverhaul.SubSystem
             return true;
         }
 
-        /// <summary>Debug only: fired when any local firearm draw completes (normally or fast-forwarded).</summary>
-        internal static void OnWeaponAppearedDebug(Player.FirearmController.SpawnOperation operation)
+        /// <summary>
+        /// Fired when any local firearm draw completes (normally or fast-forwarded). Lowering waits
+        /// for this for the pistol: RealismCommonLib's WeaponIsReady can still be true from the rifle.
+        /// </summary>
+        internal static void OnWeaponAppeared(Player.FirearmController.SpawnOperation operation)
         {
-            if (!RifleRetentionDebug.Enabled || operation.Player == null || !operation.Player.IsYourPlayer) return;
+            if (operation.Player == null || !operation.Player.IsYourPlayer) return;
             RifleRetentionDebug.Log($"SpawnOperation.WeaponAppeared weapon={RifleRetentionDebug.Name(operation.Weapon)} " +
                 $"retentionState={_instance?._state} weaponIsReady={PlayerStateInstance.WeaponIsReady}");
+            if (_instance != null && ReferenceEquals(operation.Weapon, _instance._pistol))
+                _instance._pistolAppeared = true;
         }
+
+        private bool _pistolAppeared;
 
         // Debug: keep tracing the real rifle for a while after the reveal, to see if it keeps moving.
         private const float POST_REVEAL_TRACE_TIME = 1.0f;
@@ -260,8 +273,9 @@ namespace StanceOverhaul.SubSystem
                     {
                         // The rifle's first-person object is gone (pooled); give its renderers back.
                         RestoreHeldRenderers();
-                        if (PlayerStateInstance.WeaponIsReady)
-                            SetState(ERetentionState.Retained, "pistol ready");
+                        // Not WeaponIsReady alone: it can still be true from the rifle (seen at f0 in logs).
+                        if (_pistolAppeared || IsDrawnAndIdle(handsController))
+                            SetState(ERetentionState.Retained, _pistolAppeared ? "pistol draw completed" : "pistol idle");
                     }
                     _blend = Mathf.MoveTowards(_blend, 1f, deltaTime * PluginConfig.RifleRetentionBlendSpeed.Value);
                     break;
@@ -287,15 +301,37 @@ namespace StanceOverhaul.SubSystem
                     {
                         // The copy stands in for the real rifle until it has settled onto it.
                         HideRenderersUnder(handsController!.ControllerGameObject);
-                        _realRifleReady = PlayerStateInstance.WeaponIsReady;
+
+                        // Keep the hidden rifle at rest: no previous-weapon stance (PistolCompress) easing
+                        // out on it, no spring tails. Logs showed ~4cm / 9deg of drift over ~0.45s without this.
+                        var stances = Plugin.StanceControllerInstance;
+                        if (stances != null && stances.AwakeRan)
+                        {
+                            if (!_stanceSnapLogged)
+                            {
+                                RifleRetentionDebug.Log($"snapping stance to rest: stance={stances.CurrentStanceType} stPos={RifleRetentionDebug.V(stances.StancePosition)} stRot={RifleRetentionDebug.V(stances.StanceRotation)}");
+                                _stanceSnapLogged = true;
+                            }
+                            stances.SnapStanceToRestForRetention();
+                        }
+
+                        // Fix for the one-frame junk pose right after the fast-forward (animator not posed yet):
+                        // only trust the real rifle after it has been drawn and idle for a couple of frames.
+                        bool posed = PlayerStateInstance.WeaponIsReady && IsDrawnAndIdle(handsController);
+                        _realPosedFrames = posed ? _realPosedFrames + 1 : 0;
+                        bool wasReady = _realRifleReady;
+                        _realRifleReady = _realPosedFrames >= REAL_POSE_MIN_FRAMES;
+                        if (_realRifleReady && !wasReady)
+                            RifleRetentionDebug.Log($"real rifle trusted after {_realPosedFrames} posed frames");
                     }
                     break;
             }
 
             UpdatePose(player, deltaTime);
 
-            if (RifleRetentionDebug.Enabled && (_state == ERetentionState.Lowering || _state == ERetentionState.Raising))
-                RifleRetentionDebug.TraceFrame("frame", _state.ToString(), _blend, _realRifleReady, _anchor.transform, _anchorBone);
+            // Every frame while moving; every 15th while retained (hand placement checks without flooding the log).
+            if (RifleRetentionDebug.Enabled && (_state != ERetentionState.Retained || Time.frameCount % 15 == 0))
+                RifleRetentionDebug.TraceFrame("frame", _state.ToString(), _blend, _realRifleReady, _anchor.transform, _anchorBone, LastReachClampMm);
 
             if (_state == ERetentionState.Raising && _realRifleReady && _blend <= 0f && TrySampleRealRiflePose(out Vector3 realPos, out Quaternion realRot))
             {
@@ -307,6 +343,19 @@ namespace StanceOverhaul.SubSystem
                 if (settled || _settleTimer > SETTLE_MAX_TIME)
                     Cleanup(settled ? "REVEAL settled" : "REVEAL settle timeout"); // reveals the real rifle in the same frame the copy goes away
             }
+        }
+
+        /// <summary>
+        /// The weapon in hands has finished its draw and its animator is in idle, i.e. its bones are
+        /// actually posed. On the frame of a fast-forwarded draw the animator is not idle yet and
+        /// the weapon bone reports a junk pose (241mm / ~90deg off in logs).
+        /// </summary>
+        private static bool IsDrawnAndIdle(Player.AbstractHandsController? handsController)
+        {
+            if (!(handsController is Player.FirearmController fc)) return false;
+            var op = fc.CurrentOperation;
+            if (op == null || op is Player.FirearmController.SpawnOperation) return false;
+            return op.FirearmsAnimator != null && op.FirearmsAnimator.IsIdling();
         }
 
         /// <summary>Camera-space pose of the real (hidden) rifle's weapon bone, once it is in hands.</summary>
@@ -388,6 +437,7 @@ namespace StanceOverhaul.SubSystem
             SetState(ERetentionState.Lowering, "keypress");
             UpdatePose(player, 0f);
 
+            _pistolAppeared = false;
             _skipRemoveFor = rifle;
             _skipRemoveUntil = Time.time + SKIP_REMOVE_WINDOW;
             RequestSlot(player, EquipmentSlot.Holster);
@@ -476,6 +526,8 @@ namespace StanceOverhaul.SubSystem
             _swapTimer = 0f;
             _settleTimer = 0f;
             _realRifleReady = false;
+            _realPosedFrames = 0;
+            _stanceSnapLogged = false;
             _smoothedLocalPosition = _anchor!.transform.localPosition;
             _smoothedLocalRotation = _anchor.transform.localRotation;
             SetState(ERetentionState.Raising, "keypress");
@@ -615,14 +667,28 @@ namespace StanceOverhaul.SubSystem
         /// <summary>Same selection the game uses for the first-person left grip (Player.UpdateFirstPersonGrip).</summary>
         private GripPose? FindLeftGrip(GameObject model)
         {
-            GripPose? grip = model.GetComponentsInChildren<GripPose>(true)
+            if (RifleRetentionDebug.Enabled)
+            {
+                foreach (GripPose g in model.GetComponentsInChildren<GripPose>(true))
+                    RifleRetentionDebug.Log($"  grip candidate: {PathOf(g.transform, model.transform)} hand={g.Hand} type={g.GripType} " +
+                        $"active={g.isActiveAndEnabled} cached={g.IsCached} depth={Depth(g.transform, model.transform)}");
+            }
+
+            // Active grips only, like the game (GetComponentsInChildren<GripPose>() without includeInactive).
+            // Including inactive ones could pick a disabled alternative grip point with nothing visible at it.
+            GripPose? grip = model.GetComponentsInChildren<GripPose>()
                 .Where(g => g.Hand == GripPose.EHand.Left &&
                     (g.GripType == GripPose.EGripType.Common || g.GripType == GripPose.EGripType.UnderbarrelWeapon))
                 .OrderByDescending(g => g.GripType == GripPose.EGripType.UnderbarrelWeapon)
                 .ThenByDescending(g => Depth(g.transform, model.transform))
                 .FirstOrDefault();
 
-            if (grip != null) return grip;
+            if (grip != null)
+            {
+                RifleRetentionDebug.Log($"  grip CHOSEN: {PathOf(grip.transform, model.transform)}");
+                return grip;
+            }
+            RifleRetentionDebug.Log("  no active left grip, falling back to weapon_L_IK_marker");
 
             // Fallback: the weapon's left-hand IK marker, without finger data.
             TransformLinks links = model.GetComponentInChildren<TransformLinks>(true);
@@ -636,6 +702,14 @@ namespace StanceOverhaul.SubSystem
             fallback.GripType = GripPose.EGripType.Common;
             fallback.DontCache = true;
             return fallback;
+        }
+
+        private static string PathOf(Transform t, Transform root)
+        {
+            string path = t.name;
+            for (Transform p = t.parent; p != null && p != root; p = p.parent)
+                path = p.name + "/" + path;
+            return path;
         }
 
         private static int Depth(Transform child, Transform root)
@@ -695,9 +769,47 @@ namespace StanceOverhaul.SubSystem
             _anchor!.transform.localPosition = pos;
             _anchor.transform.localRotation = rot;
 
+            ClampToArmReach(player, eased);
+
             // Re-assert every frame: other systems (props, door interactions) also drive these.
             player.LeftHandInteractionTarget = _leftGrip;
             player.ThirdIkWeight.Value = 1f;
+        }
+
+        private static readonly FieldInfo _limbsField = AccessTools.Field(typeof(Player), "_limbs");
+        private const float REACH_MARGIN = 0.97f;
+
+        /// <summary>Last clamp applied (mm), for the debug trace.</summary>
+        public float LastReachClampMm { get; private set; }
+
+        /// <summary>
+        /// If the copy's grip is further from the left shoulder than the arm can reach, the IK leaves
+        /// the hand short of it, in the air. Pull the copy toward the shoulder just enough to make the
+        /// grip reachable. No-op when it already is.
+        /// </summary>
+        private void ClampToArmReach(Player player, float loweredAmount)
+        {
+            LastReachClampMm = 0f;
+            if (!PluginConfig.RifleRetentionClampReach.Value || _leftGrip == null || _anchor == null) return;
+
+            if (!(_limbsField.GetValue(player) is LimbIK[] limbs) || limbs.Length == 0 || limbs[0] == null) return;
+            var solver = limbs[0].solver;
+            if (solver.bone1?.transform == null || solver.bone2?.transform == null || solver.bone3?.transform == null) return;
+
+            Vector3 shoulder = solver.bone1.transform.position;
+            float reach = (Vector3.Distance(shoulder, solver.bone2.transform.position)
+                + Vector3.Distance(solver.bone2.transform.position, solver.bone3.transform.position)) * REACH_MARGIN;
+
+            Vector3 toGrip = _leftGrip.transform.position - shoulder;
+            float distance = toGrip.magnitude;
+            if (distance <= reach || distance < 0.0001f) return;
+
+            // Scaled by how lowered the rifle is: at the held pose the arm is legitimately near full
+            // extension, and the copy must stay exactly on the real rifle for the hand-over.
+            float excess = (distance - reach) * loweredAmount;
+            if (excess <= 0f) return;
+            _anchor.transform.position -= toGrip / distance * excess;
+            LastReachClampMm = excess * 1000f;
         }
 
         private void Cleanup(string reason)
@@ -706,6 +818,9 @@ namespace StanceOverhaul.SubSystem
             _skipSpawnFor = null;
             _pendingSpawnSkip = null;
             _realRifleReady = false;
+            _realPosedFrames = 0;
+            _stanceSnapLogged = false;
+            _pistolAppeared = false;
             _settleTimer = 0f;
             _patrolPoseValid = false;
             RestoreHeldRenderers();

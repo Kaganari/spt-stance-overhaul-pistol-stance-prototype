@@ -1,6 +1,7 @@
 using BepInEx.Logging;
 using EFT;
 using EFT.InventoryLogic;
+using RootMotion.FinalIK;
 using UnityEngine;
 using static RealismCommonLib.Plugin;
 
@@ -39,7 +40,37 @@ namespace StanceOverhaul.SubSystem
         public static string Name(Item? item)
         {
             if (item == null) return "null";
-            return item.ShortName + "#" + item.Id.Substring(0, Mathf.Min(6, item.Id.Length));
+            string name;
+            try { name = item.LocalizedShortName(); }
+            catch { name = item.TemplateId.ToString(); }
+            return name + "#" + item.Id.ToString().Substring(Mathf.Max(0, item.Id.ToString().Length - 4));
+        }
+
+        private static string _lastIk = "ik=?";
+
+        /// <summary>
+        /// Called right after the game's IK solve (Player.IkApply postfix): where the left hand actually
+        /// ended up vs. the retention grip it was told to hold, and whether that grip is within arm reach.
+        /// Printed with the next frame's trace line.
+        /// </summary>
+        public static void RecordIk(Player player, LimbIK[]? limbs)
+        {
+            if (!Enabled) return;
+            if (limbs == null || limbs.Length == 0 || limbs[0] == null) { _lastIk = "ik=no limbs"; return; }
+            var solver = limbs[0].solver;
+            GripPose target = player.LeftHandInteractionTarget;
+            if (target == null || solver.bone1?.transform == null || solver.bone2?.transform == null || solver.bone3?.transform == null)
+            {
+                _lastIk = $"ik target={(target == null ? "none" : target.name)}";
+                return;
+            }
+
+            Vector3 shoulder = solver.bone1.transform.position;
+            Vector3 hand = solver.bone3.transform.position;
+            Vector3 grip = target.transform.position;
+            float reach = Vector3.Distance(shoulder, solver.bone2.transform.position) + Vector3.Distance(solver.bone2.transform.position, hand);
+            _lastIk = $"ik hand->grip={(hand - grip).magnitude * 1000f:F1}mm shoulder->grip={(grip - shoulder).magnitude * 1000f:F0}mm reach={reach * 1000f:F0}mm " +
+                $"w={solver.IKPositionWeight:F2} third={player.ThirdIkWeight.Value:F2} target={target.name}";
         }
 
         public static string V(Vector3 v) => $"({v.x:F4},{v.y:F4},{v.z:F4})";
@@ -53,7 +84,7 @@ namespace StanceOverhaul.SubSystem
         /// per-frame movement, the copy's pose, and every spring/stance input that feeds the weapon.
         /// </summary>
         public static void TraceFrame(string phase, string state, float blend, bool realReady,
-            Transform? copyAnchor, ECharacterWeaponBones anchorBone)
+            Transform? copyAnchor, ECharacterWeaponBones anchorBone, float reachClampMm = 0f)
         {
             if (!Enabled) return;
 
@@ -110,7 +141,7 @@ namespace StanceOverhaul.SubSystem
             }
 
             Log($"[{phase}] state={state} blend={blend:F3} realReady={realReady} weaponIsReady={PlayerStateInstance.WeaponIsReady} " +
-                $"{handsInfo} {opInfo} | {realInfo} | {copyInfo} |" +
+                $"{handsInfo} {opInfo} | {realInfo} | {copyInfo} reachClamp={reachClampMm:F1}mm | {_lastIk} |" +
                 $" handsP={V(hands.HandsPosition.Get())} handsR={V(hands.HandsRotation.Get())}{springInfo}");
         }
     }

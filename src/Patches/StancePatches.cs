@@ -140,8 +140,8 @@ namespace StanceOverhaul.Patches
         }
     }
 
-    /// <summary>Debug only (no behaviour change): logs when a local firearm draw completes.</summary>
-    public class RetentionDebugWeaponAppearedPatch : ModulePatch
+    /// <summary>Rifle retention: tells the system when a local firearm draw has really completed.</summary>
+    public class RetentionWeaponAppearedPatch : ModulePatch
     {
         protected override MethodBase GetTargetMethod()
         {
@@ -151,7 +151,28 @@ namespace StanceOverhaul.Patches
         [PatchPostfix]
         private static void Postfix(Player.FirearmController.SpawnOperation __instance)
         {
-            StanceOverhaul.SubSystem.RifleRetentionSystem.OnWeaponAppearedDebug(__instance);
+            StanceOverhaul.SubSystem.RifleRetentionSystem.OnWeaponAppeared(__instance);
+        }
+    }
+
+    /// <summary>Rifle retention debug only (no behaviour change): measures the left hand vs. its grip after the IK solve.</summary>
+    public class RetentionDebugIkApplyPatch : ModulePatch
+    {
+        private static FieldInfo _limbsField = null!;
+
+        protected override MethodBase GetTargetMethod()
+        {
+            _limbsField = AccessTools.Field(typeof(Player), "_limbs");
+            return AccessTools.Method(typeof(Player), nameof(Player.IkApply));
+        }
+
+        [PatchPostfix]
+        private static void Postfix(Player __instance)
+        {
+            if (!__instance.IsYourPlayer || StanceControllerInstance == null || !StanceControllerInstance.IsRetainingRifle
+                || !StanceOverhaul.SubSystem.RifleRetentionDebug.Enabled)
+                return;
+            StanceOverhaul.SubSystem.RifleRetentionDebug.RecordIk(__instance, (LimbIK[])_limbsField.GetValue(__instance));
         }
     }
 

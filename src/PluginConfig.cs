@@ -272,6 +272,7 @@ namespace StanceOverhaul
         public static ConfigEntry<float> RifleRetentionRoll { get; set; }
         public static ConfigEntry<float> RifleRetentionBlendSpeed { get; set; }
         public static ConfigEntry<bool> RifleRetentionDebug { get; set; }
+        public static ConfigEntry<bool> RifleRetentionClampReach { get; set; }
 #pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
 
         public static void InitConfigBindings(ConfigFile config)
@@ -545,6 +546,7 @@ namespace StanceOverhaul
             RifleRetentionRoll = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Rotation Z", 0f, new ConfigDescription("Added to the Patrol stance rotation for the retained rifle (degrees). Same axes as the stance curves.", new AcceptableValueRange<float>(-60f, 60f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 75, Browsable = true }));
             RifleRetentionBlendSpeed = config.Bind<float>(rifleRetention, "Rifle Lowering Speed", 3.5f, new ConfigDescription("How fast the rifle drops from the held pose to the patrol pose, and back when raising it (1 / seconds).", new AcceptableValueRange<float>(0.1f, 20f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 70, Browsable = true }));
             RifleRetentionDebug = config.Bind<bool>(rifleRetention, "Debug Logging", false, new ConfigDescription("Logs every retention step and a per-frame trace of the real rifle (incl. 1s after it is revealed) to BepInEx/LogOutput.log under StanceOverhaul.Retention. Leave off for normal play.", null, new ConfigurationManagerAttributes { Order = 60, IsAdvanced = true, Browsable = true }));
+            RifleRetentionClampReach = config.Bind<bool>(rifleRetention, "Keep Rifle Within Arm Reach", true, new ConfigDescription("If the retained rifle's handguard ends up further than the left arm can reach, pull the rifle toward the shoulder so the hand actually holds it instead of stopping short in the air.", null, new ConfigurationManagerAttributes { Order = 65, IsAdvanced = true, Browsable = true }));
         }
     }
 }

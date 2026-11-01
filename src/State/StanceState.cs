@@ -346,5 +346,28 @@ namespace StanceOverhaul.State
                 _incomingPaused = false;
             }
         }
+
+        /// <summary>
+        /// Like CancelAll, but with no exit animation: the stance offsets drop to zero this frame.
+        /// Used by rifle retention, where the rifle must arrive in hands already at rest
+        /// (otherwise the previous weapon's stance, e.g. PistolCompress, visibly eases out on it).
+        /// </summary>
+        public void ClearImmediate()
+        {
+            CancelAll(); // keeps the OnEnter/OnExit bookkeeping balanced
+
+            if (_incoming != null)
+            {
+                _incoming = null;
+                _incomingPaused = false;
+            }
+            if (PrimarySlot != null)
+                PrimarySlot = null;
+
+            _smoothedPosition = Vector3.zero;
+            _smoothedRotation = Vector3.zero;
+            StancePosition = Vector3.zero;
+            StanceRotation = Vector3.zero;
+        }
     }
 }

@@ -229,6 +229,29 @@ namespace StanceOverhaul.Controllers
         public bool IsRetainingRifle => _rifleRetentionSystem != null && _rifleRetentionSystem.IsActive;
         public bool ForceRetentionLeftHandIK => _rifleRetentionSystem != null && _rifleRetentionSystem.ForceLeftHandIK;
 
+        /// <summary>
+        /// Rifle retention: put the weapon at rest right now. Clears the stance state with no exit
+        /// animation and snaps the stance/offset springs onto their targets, so nothing eases the
+        /// weapon around after it appears.
+        /// </summary>
+        public void SnapStanceToRestForRetention()
+        {
+            _stanceState.ClearImmediate();
+
+            StancePositionSpring.Zero = StancePosition + BaseWeaponOffsetPosition;
+            StanceRotationSpring.Zero = StanceRotation;
+            OffsetPositionSpring.Zero = DetailsOffsetPosition;
+            OffsetRotationSpring.Zero = DetailsOffsetRotation;
+
+            foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring, OffsetPositionSpring, OffsetRotationSpring })
+            {
+                spring.Current = Vector3.zero;
+                spring.Velocity = Vector3.zero;
+                spring.ForceAccumulator = Vector3.zero;
+                spring.ForceAccumulatorLimitless = Vector3.zero;
+            }
+        }
+
         public Spring StancePositionSpring { get; private set; }
         public Spring StanceRotationSpring { get; private set; }
         public Spring OffsetPositionSpring { get; private set; }
