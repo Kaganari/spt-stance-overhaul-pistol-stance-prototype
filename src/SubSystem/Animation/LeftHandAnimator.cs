@@ -112,6 +112,9 @@ namespace StanceOverhaul.SubSystem.Animator
 
         private void StanceRemoveLeftHand(IStance stance)
         {
+            // Rifle retention owns the left hand while active.
+            if (Plugin.StanceControllerInstance.IsRetainingRifle) return;
+
             if (stance.StanceType == EStanceType.PatrolStance && WeaponStateInstance.TreatAsPistol)
             {
                 PlayerStateInstance.Player.LeftHandInteractionTarget = _leftHandMarkerGrip;
@@ -172,7 +175,7 @@ namespace StanceOverhaul.SubSystem.Animator
                 _blockSoundEffect = false;
             }
 
-            if (_updateOverride)
+            if (_updateOverride && !Plugin.StanceControllerInstance.IsRetainingRifle)
             {
                 var speed = _overrideLeftHand ? 1.5f : 2f;
                 PlayerStateInstance.Player.ThirdIkWeight.Value = Mathf.MoveTowards(PlayerStateInstance.Player.ThirdIkWeight.Value, _overrideLeftHand ? 1f : 0f, speed * Time.deltaTime);

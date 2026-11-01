@@ -65,6 +65,81 @@ namespace StanceOverhaul.Patches
         }
     }
 
+    /// <summary>
+    /// Rifle retention: the swap animations free the left hand via the LEFT_HAND_WEIGHT curve,
+    /// which zeroes the left limb IK weight and makes IkProcess skip it entirely. While the
+    /// retained rifle copy is shown, keep the left arm fully on IK so it stays on the handguard.
+    /// </summary>
+    public class RetentionLeftHandIKPatch : ModulePatch
+    {
+        private static FieldInfo _limbsField = null!;
+
+        protected override MethodBase GetTargetMethod()
+        {
+            _limbsField = AccessTools.Field(typeof(Player), "_limbs");
+            return AccessTools.Method(typeof(Player), nameof(Player.IkProcess));
+        }
+
+        [PatchPrefix]
+        private static void Prefix(Player __instance)
+        {
+            if (!__instance.IsYourPlayer || StanceControllerInstance == null || !StanceControllerInstance.ForceRetentionLeftHandIK)
+                return;
+
+            LimbIK[] limbs = (LimbIK[])_limbsField.GetValue(__instance);
+            if (limbs == null || limbs.Length == 0 || limbs[0] == null)
+                return;
+
+            limbs[0].solver.IKPositionWeight = 1f;
+            limbs[0].solver.IKRotationWeight = 1f;
+            if (__instance.HandPosers != null && __instance.HandPosers.Length > 0 && __instance.HandPosers[0] != null)
+                __instance.HandPosers[0].weight = 1f;
+        }
+    }
+
+    /// <summary>
+    /// Rifle retention: skip the "put the rifle away" animation. The game already has an instant
+    /// path in Remove.Start (Start + FastForward, used for simplified skeletons); we take it only
+    /// for the one rifle the retention system just asked to swap away from.
+    /// </summary>
+    public class RetentionSkipRifleRemovePatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(Player.FirearmController.Remove), nameof(Player.FirearmController.Remove.Start),
+                new[] { typeof(Action), typeof(bool), typeof(Item) });
+        }
+
+        [PatchPostfix]
+        private static void Postfix(Player.FirearmController.Remove __instance)
+        {
+            if (StanceOverhaul.SubSystem.RifleRetentionSystem.ConsumeSkipRemove(__instance.Player, __instance.Weapon))
+                __instance.FastForward();
+        }
+    }
+
+    /// <summary>
+    /// Rifle retention, switching back: skip the rifle's draw animation. SpawnOperation.FastForward
+    /// jumps the animator to idle and completes the draw (WeaponAppeared). The retained copy has
+    /// already shown the rifle coming up, so the real rifle should just be there.
+    /// </summary>
+    public class RetentionSkipRifleSpawnPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(Player.FirearmController.SpawnOperation), nameof(Player.FirearmController.SpawnOperation.Start),
+                new[] { typeof(Action) });
+        }
+
+        [PatchPostfix]
+        private static void Postfix(Player.FirearmController.SpawnOperation __instance)
+        {
+            // Hides the rifle now; the fast-forward itself is deferred to the next frame
+            // (RifleRetentionSystem) so the game's swap code has fully returned first.
+            StanceOverhaul.SubSystem.RifleRetentionSystem.ConsumeSkipSpawn(__instance);
+        }
+    }
+
     public class ElbowIKPatch : ModulePatch
     {
         private static FieldInfo _iKArrayField;

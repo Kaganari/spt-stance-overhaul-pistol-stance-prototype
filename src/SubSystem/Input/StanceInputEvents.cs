@@ -17,6 +17,12 @@ namespace StanceOverhaul.SubSystem.StanceInput
         public static event Action? OnActiveAimKeyUp;
         public static event Action? ToggleOffAllStances;
         public static event Action? OnAttemptedToFireFromStance;
+        public static event Action? ToggleRifleRetention;
+
+        internal static void RaiseToggleRifleRetention()
+        {
+            BaseEventHandler.RaiseEvent(ToggleRifleRetention);
+        }
 
         internal static void RaiseOnAttemptedToFireFromStance()
         {

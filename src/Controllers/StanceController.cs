@@ -224,6 +224,10 @@ namespace StanceOverhaul.Controllers
         private StanceReloadSpeedSystem _reloadSpeedSystem;
         private WeaponOffsetAnimator _weaponOffsetAnimator;
         private LeftHandAnimaor _leftHandAnimator;
+        private RifleRetentionSystem _rifleRetentionSystem;
+
+        public bool IsRetainingRifle => _rifleRetentionSystem != null && _rifleRetentionSystem.IsActive;
+        public bool ForceRetentionLeftHandIK => _rifleRetentionSystem != null && _rifleRetentionSystem.ForceLeftHandIK;
 
         public Spring StancePositionSpring { get; private set; }
         public Spring StanceRotationSpring { get; private set; }
@@ -358,6 +362,9 @@ namespace StanceOverhaul.Controllers
 
             _leftHandAnimator =
                InitStateController(() => new LeftHandAnimaor());
+
+            _rifleRetentionSystem =
+               InitStateController(() => new RifleRetentionSystem());
 
             RunControllerAwake();
         }

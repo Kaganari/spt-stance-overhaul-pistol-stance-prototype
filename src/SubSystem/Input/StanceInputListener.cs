@@ -51,6 +51,7 @@ namespace StanceOverhaul.SubSystem.StanceInput
                 {
                     CheckForPatrolInput();
                     CheckForMeleeInput();
+                    CheckForRifleRetentionInput();
 
                     if (!WeaponStateInstance.TreatAsPistol)
                     {
@@ -142,6 +143,16 @@ namespace StanceOverhaul.SubSystem.StanceInput
             if (Input.GetKeyDown(PluginConfig.PatrolKeybind.Value.MainKey) && PluginConfig.PatrolKeybind.Value.Modifiers.All(Input.GetKey))
             {
                 StanceInputEvents.RaiseTogglePatrolStance();
+            }
+        }
+
+        public void CheckForRifleRetentionInput()
+        {
+            if (!PluginConfig.EnableRifleRetention.Value) return;
+
+            if (Input.GetKeyDown(PluginConfig.RifleRetentionKeybind.Value.MainKey) && PluginConfig.RifleRetentionKeybind.Value.Modifiers.All(Input.GetKey))
+            {
+                StanceInputEvents.RaiseToggleRifleRetention();
             }
         }
 

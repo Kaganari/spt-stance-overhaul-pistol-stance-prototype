@@ -260,6 +260,17 @@ namespace StanceOverhaul
         public static ConfigEntry<float> NormalVisibleLaserBonus { get; set; }
         public static ConfigEntry<float> NormalWhiteLightWithLaserBonus { get; set; }
         public static ConfigEntry<float> NormalWhiteLightBonus { get; set; }
+
+        // Rifle Retention (prototype)
+        public static ConfigEntry<bool> EnableRifleRetention { get; set; }
+        public static ConfigEntry<KeyboardShortcut> RifleRetentionKeybind { get; set; }
+        public static ConfigEntry<float> RifleRetentionPosX { get; set; }
+        public static ConfigEntry<float> RifleRetentionPosY { get; set; }
+        public static ConfigEntry<float> RifleRetentionPosZ { get; set; }
+        public static ConfigEntry<float> RifleRetentionPitch { get; set; }
+        public static ConfigEntry<float> RifleRetentionYaw { get; set; }
+        public static ConfigEntry<float> RifleRetentionRoll { get; set; }
+        public static ConfigEntry<float> RifleRetentionBlendSpeed { get; set; }
 #pragma warning restore CS8618 // Non-nullable field must contain a non-null value when exiting constructor. Consider adding the 'required' modifier or declaring as nullable.
 
         public static void InitConfigBindings(ConfigFile config)
@@ -521,6 +532,17 @@ namespace StanceOverhaul
             PistolMagazineReloadSpeedModifier = config.Bind<float>(pistol, "Pistol Magazine Reload Speed Modifier", 1f, new ConfigDescription("Multiplier applied to magazine reload speed while in pistol stance.", new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 7, IsAdvanced = true, Browsable = true }));
             PistolRevolverReloadSpeedModifier = config.Bind<float>(pistol, "Pistol Revolver Reload Speed Modifier", 1.1f, new ConfigDescription("Multiplier applied to revolver reload speed while in pistol stance.", new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 6, IsAdvanced = true, Browsable = true }));
             PistolWeaponManipSpeedModifier = config.Bind<float>(pistol, "Pistol Chamber Reload Speed Modifier", 1.1f, new ConfigDescription("Multiplier applied to chamber reload speed while in pistol stance.", new AcceptableValueRange<float>(0f, 20f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 5, IsAdvanced = true, Browsable = true }));
+
+            string rifleRetention = "14. Rifle Retention (Prototype)";
+            EnableRifleRetention = config.Bind<bool>(rifleRetention, "Enable Rifle Retention", false, new ConfigDescription("PROTOTYPE. Drawing the pistol with the Rifle Retention key keeps the rifle in the left hand, lowered.", null, new ConfigurationManagerAttributes { Order = 100, Browsable = true }));
+            RifleRetentionKeybind = config.Bind(rifleRetention, "Rifle Retention Keybind", new KeyboardShortcut(KeyCode.None), new ConfigDescription("With a rifle in hands: draw the holstered pistol and retain the rifle. While retaining: switch back to the rifle.", null, new ConfigurationManagerAttributes { Order = 90, Browsable = true }));
+            RifleRetentionPosX = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Position X", 0f, new ConfigDescription("Added to the Patrol stance position for the retained rifle. Same units and axes as the stance curves.", new AcceptableValueRange<float>(-0.3f, 0.3f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 80, Browsable = true }));
+            RifleRetentionPosY = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Position Y", 0f, new ConfigDescription("Added to the Patrol stance position for the retained rifle. Same units and axes as the stance curves.", new AcceptableValueRange<float>(-0.3f, 0.3f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 79, Browsable = true }));
+            RifleRetentionPosZ = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Position Z", 0f, new ConfigDescription("Added to the Patrol stance position for the retained rifle. Same units and axes as the stance curves.", new AcceptableValueRange<float>(-0.3f, 0.3f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 78, Browsable = true }));
+            RifleRetentionPitch = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Rotation X", 0f, new ConfigDescription("Added to the Patrol stance rotation for the retained rifle (degrees). Same axes as the stance curves.", new AcceptableValueRange<float>(-60f, 60f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 77, Browsable = true }));
+            RifleRetentionYaw = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Rotation Y", 0f, new ConfigDescription("Added to the Patrol stance rotation for the retained rifle (degrees). Same axes as the stance curves.", new AcceptableValueRange<float>(-60f, 60f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 76, Browsable = true }));
+            RifleRetentionRoll = config.Bind<float>(rifleRetention, "Patrol Pose Tweak: Rotation Z", 0f, new ConfigDescription("Added to the Patrol stance rotation for the retained rifle (degrees). Same axes as the stance curves.", new AcceptableValueRange<float>(-60f, 60f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 75, Browsable = true }));
+            RifleRetentionBlendSpeed = config.Bind<float>(rifleRetention, "Rifle Lowering Speed", 3.5f, new ConfigDescription("How fast the rifle drops from the held pose to the patrol pose, and back when raising it (1 / seconds).", new AcceptableValueRange<float>(0.1f, 20f), new ConfigurationManagerAttributes { ShowRangeAsPercent = false, Order = 70, Browsable = true }));
         }
     }
 }
