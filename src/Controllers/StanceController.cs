@@ -231,7 +231,7 @@ namespace StanceOverhaul.Controllers
 
         /// <summary>
         /// Rifle retention: put the weapon at rest right now. Clears the stance state with no exit
-        /// animation and snaps the stance/offset springs onto their targets, so nothing eases the
+        /// animation and snaps the stance/offset springs onto their rest values, so nothing eases the
         /// weapon around after it appears.
         /// </summary>
         public void SnapStanceToRestForRetention()
@@ -243,9 +243,12 @@ namespace StanceOverhaul.Controllers
             OffsetPositionSpring.Zero = DetailsOffsetPosition;
             OffsetRotationSpring.Zero = DetailsOffsetRotation;
 
+            // Spring.Get() is Zero + Current and FixedUpdate pulls Current toward Zero, so the rest
+            // output is 2 * Zero. Current = 0 would pin the springs halfway and they would finish
+            // the travel after the reveal (logs: ~16mm / ~0.6deg of drift = the visible jerk).
             foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring, OffsetPositionSpring, OffsetRotationSpring })
             {
-                spring.Current = Vector3.zero;
+                spring.Current = spring.Zero;
                 spring.Velocity = Vector3.zero;
                 spring.ForceAccumulator = Vector3.zero;
                 spring.ForceAccumulatorLimitless = Vector3.zero;

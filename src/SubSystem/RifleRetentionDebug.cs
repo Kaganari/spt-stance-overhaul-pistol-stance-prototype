@@ -20,6 +20,7 @@ namespace StanceOverhaul.SubSystem
         private static int _f0;
         private static bool _hasLastRealPos;
         private static Vector3 _lastRealPos;
+        private static Quaternion _lastRealRot = Quaternion.identity;
 
         public static bool Enabled => PluginConfig.RifleRetentionDebug != null && PluginConfig.RifleRetentionDebug.Value;
 
@@ -80,7 +81,7 @@ namespace StanceOverhaul.SubSystem
 
         /// <summary>
         /// One line describing everything that could move the real rifle: hands controller and its
-        /// current operation, animator idle state, real weapon bone pose (camera space) and its
+        /// current operation, animator idle state, real weapon bone pose (RetentionSpace) and its
         /// per-frame movement, the copy's pose, and every spring/stance input that feeds the weapon.
         /// </summary>
         public static void TraceFrame(string phase, string state, float blend, bool realReady,
@@ -107,18 +108,21 @@ namespace StanceOverhaul.SubSystem
             }
 
             string realInfo = "real=?";
-            Transform cam = hands.CameraTransform;
+            // Same space the copy's anchor lives in, so "real" and "copy" are directly comparable.
+            Transform? space = RifleRetentionSystem.RetentionSpace;
             Transform bone = anchorBone == ECharacterWeaponBones.weapon && hands.Weapon != null ? hands.Weapon : hands.WeaponRoot;
             Vector3 realPos = Vector3.zero;
             Quaternion realRot = Quaternion.identity;
-            if (cam != null && bone != null)
+            if (space != null && bone != null)
             {
-                realPos = cam.InverseTransformPoint(bone.position);
-                realRot = Quaternion.Inverse(cam.rotation) * bone.rotation;
+                realPos = space.InverseTransformPoint(bone.position);
+                realRot = Quaternion.Inverse(space.rotation) * bone.rotation;
                 float moved = _hasLastRealPos ? (realPos - _lastRealPos).magnitude * 1000f : 0f;
+                float movedDeg = _hasLastRealPos ? Quaternion.Angle(realRot, _lastRealRot) : 0f;
                 _lastRealPos = realPos;
+                _lastRealRot = realRot;
                 _hasLastRealPos = true;
-                realInfo = $"real pos={V(realPos)} rot={E(realRot)} moved={moved:F1}mm";
+                realInfo = $"real pos={V(realPos)} rot={E(realRot)} moved={moved:F1}mm/{movedDeg:F2}deg";
             }
 
             string copyInfo = "copy=none";

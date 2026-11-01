@@ -58,7 +58,7 @@ namespace StanceOverhaul.SubSystem
         private readonly List<Collider> _disabledColliders = new List<Collider>();
         private readonly List<Renderer> _hiddenHeldRenderers = new List<Renderer>();
 
-        // Held rifle pose and lowered (patrol-derived) pose, both in camera space, captured on keypress.
+        // Held rifle pose and lowered (patrol-derived) pose, both in RetentionSpace, captured on keypress.
         private Vector3 _heldLocalPosition;
         private Quaternion _heldLocalRotation;
         private Vector3 _loweredLocalPosition;
@@ -94,6 +94,7 @@ namespace StanceOverhaul.SubSystem
         private const float SETTLE_ANGLE_EPSILON = 1f;
         private const float SETTLE_MAX_TIME = 0.3f;
         private const int REAL_POSE_MIN_FRAMES = 2;
+        private const float RAISE_HOLD_BLEND = 0.2f; // how far short of the top the copy waits for the real rifle
         private bool _realRifleReady;
         private int _realPosedFrames;
         private bool _stanceSnapLogged;
@@ -299,7 +300,15 @@ namespace StanceOverhaul.SubSystem
                         Cleanup(_swapTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
                         return;
                     }
-                    _blend = Mathf.MoveTowards(_blend, 0f, deltaTime * PluginConfig.RifleRetentionBlendSpeed.Value);
+                    float raiseSpeed = PluginConfig.RifleRetentionBlendSpeed.Value;
+                    if (_realRifleReady)
+                        _blend = Mathf.MoveTowards(_blend, 0f, deltaTime * raiseSpeed);
+                    else
+                        // Don't park on the pose saved at keypress while the pistol holsters: the real
+                        // rifle comes back ~1cm / 1deg off it and then settles into its idle (logs).
+                        // Ease toward just short of the top instead, and finish the rise onto the
+                        // real rifle's live pose once it is trusted, so the correction is mid-motion.
+                        _blend = Mathf.Lerp(_blend, RAISE_HOLD_BLEND, 1f - Mathf.Exp(-raiseSpeed * deltaTime));
                     if (rifleInHands)
                     {
                         // The copy stands in for the real rifle until it has settled onto it.
@@ -361,17 +370,32 @@ namespace StanceOverhaul.SubSystem
             return op.FirearmsAnimator != null && op.FirearmsAnimator.IsIdling();
         }
 
-        /// <summary>Camera-space pose of the real (hidden) rifle's weapon bone, once it is in hands.</summary>
+        /// <summary>
+        /// Reference space for every retention pose: the camera's parent, not "Cam" itself. Cam's own
+        /// local rotation/position also carries freelook (head rotation), camera recoil and aim
+        /// alignment, none of which move the weapon; anchored under Cam the copy swung with freelook.
+        /// Lives under the player's CameraContainer, so it is stable across weapon swaps.
+        /// </summary>
+        internal static Transform? RetentionSpace
+        {
+            get
+            {
+                Transform? cam = PlayerStateInstance.PWA?.HandsContainer?.CameraTransform;
+                return cam != null && cam.parent != null ? cam.parent : cam;
+            }
+        }
+
+        /// <summary>Retention-space pose of the real (hidden) rifle's weapon bone, once it is in hands.</summary>
         private bool TrySampleRealRiflePose(out Vector3 localPos, out Quaternion localRot)
         {
             localPos = Vector3.zero;
             localRot = Quaternion.identity;
             var hands = PlayerStateInstance.PWA.HandsContainer;
-            Transform cam = hands.CameraTransform;
+            Transform? space = RetentionSpace;
             Transform bone = _anchorBone == ECharacterWeaponBones.weapon && hands.Weapon != null ? hands.Weapon : hands.WeaponRoot;
-            if (cam == null || bone == null) return false;
-            localPos = cam.InverseTransformPoint(bone.position);
-            localRot = Quaternion.Inverse(cam.rotation) * bone.rotation;
+            if (space == null || bone == null) return false;
+            localPos = space.InverseTransformPoint(bone.position);
+            localRot = Quaternion.Inverse(space.rotation) * bone.rotation;
             return true;
         }
 
@@ -417,21 +441,21 @@ namespace StanceOverhaul.SubSystem
             if (!(equipment.GetSlot(EquipmentSlot.Holster).ContainedItem is Weapon pistol)) return;
 
             var hands = PlayerStateInstance.PWA.HandsContainer;
-            Transform cam = hands.CameraTransform;
+            Transform? space = RetentionSpace;
             Transform heldBone = hands.Weapon != null ? hands.Weapon : hands.WeaponRoot;
-            if (cam == null || heldBone == null) return;
+            if (space == null || heldBone == null) return;
 
             _rifle = rifle;
             _pistol = pistol;
             _rifleSlot = rifleSlot;
 
-            if (!SpawnCopy(player, cam, heldBone))
+            if (!SpawnCopy(player, space, heldBone))
             {
                 Cleanup("copy spawn failed");
                 return;
             }
 
-            _patrolPoseValid = CaptureSpringState(cam, heldBone);
+            _patrolPoseValid = CaptureSpringState(space, heldBone);
             EvaluateLoweredPose();
 
             HideRenderersUnder(player.HandsController?.ControllerGameObject);
@@ -457,7 +481,7 @@ namespace StanceOverhaul.SubSystem
         /// contribution removed, so the Patrol pose can be re-evaluated every frame (live tweaking)
         /// after the real rifle has left the hands.
         /// </summary>
-        private bool CaptureSpringState(Transform cam, Transform heldBone)
+        private bool CaptureSpringState(Transform space, Transform heldBone)
         {
             var hands = PlayerStateInstance.PWA.HandsContainer;
             var stances = Plugin.StanceControllerInstance;
@@ -480,18 +504,18 @@ namespace StanceOverhaul.SubSystem
             _springBaseRot = Quaternion.Inverse(SpringEuler(curRotTotal)) * heldRot;
             _springPrePivotPos = wra.localPosition - _springBaseRot * _springRotCenter + heldRot * _springRotCenter;
 
-            // Held bone relative to WeaponRootAnim, and WeaponRootAnim's parent in camera space.
+            // Held bone relative to WeaponRootAnim, and WeaponRootAnim's parent in retention space.
             _springRelPos = Quaternion.Inverse(wra.rotation) * (heldBone.position - wra.position);
             _springRelRot = Quaternion.Inverse(wra.rotation) * heldBone.rotation;
-            _springParentCamPos = cam.InverseTransformPoint(parent.position);
-            _springParentCamRot = Quaternion.Inverse(cam.rotation) * parent.rotation;
+            _springParentCamPos = space.InverseTransformPoint(parent.position);
+            _springParentCamRot = Quaternion.Inverse(space.rotation) * parent.rotation;
             return true;
         }
 
         /// <summary>
         /// Where the held rifle would be in the Patrol stance (+ tweaks), by replaying the game's
         /// hands-spring math: position offset on WeaponRootAnim, then rotation around RotationCenter.
-        /// Writes the camera-space pose of the copy's anchor bone.
+        /// Writes the RetentionSpace pose of the copy's anchor bone.
         /// </summary>
         private void EvaluateLoweredPose()
         {
@@ -515,7 +539,7 @@ namespace StanceOverhaul.SubSystem
             Vector3 tgtPos = _springPrePivotPos + (tgtPosTotal - _springCurPosTotal)
                 + _springBaseRot * _springRotCenter - tgtRot * _springRotCenter;
 
-            // Parent space -> camera space, then carry the bone rigidly with WeaponRootAnim.
+            // Parent space -> RetentionSpace, then carry the bone rigidly with WeaponRootAnim.
             Vector3 wraCamPos = _springParentCamPos + _springParentCamRot * tgtPos;
             Quaternion wraCamRot = _springParentCamRot * tgtRot;
             _loweredLocalPosition = wraCamPos + wraCamRot * _springRelPos;
@@ -561,18 +585,18 @@ namespace StanceOverhaul.SubSystem
             return ReferenceEquals(player.Equipment.GetSlot(_rifleSlot).ContainedItem, _rifle);
         }
 
-        private bool SpawnCopy(Player player, Transform cam, Transform heldBone)
+        private bool SpawnCopy(Player player, Transform space, Transform heldBone)
         {
             // Bundles are already loaded (the rifle is in hands), so the sync path is cheap.
             _rifleModel = Singleton<ObjectsFactory>.Instance.CreateItem(_rifle, false);
             if (_rifleModel == null) return false;
             PrepareModel(_rifleModel);
 
-            _heldLocalPosition = cam.InverseTransformPoint(heldBone.position);
-            _heldLocalRotation = Quaternion.Inverse(cam.rotation) * heldBone.rotation;
+            _heldLocalPosition = space.InverseTransformPoint(heldBone.position);
+            _heldLocalRotation = Quaternion.Inverse(space.rotation) * heldBone.rotation;
 
             _anchor = new GameObject("RetainedRifleAnchor");
-            _anchor.transform.SetParent(cam, false);
+            _anchor.transform.SetParent(space, false);
             _anchor.transform.localPosition = _heldLocalPosition;
             _anchor.transform.localRotation = _heldLocalRotation;
 
@@ -738,9 +762,9 @@ namespace StanceOverhaul.SubSystem
 
         private void UpdatePose(Player player, float deltaTime)
         {
-            Transform cam = PlayerStateInstance.PWA.HandsContainer.CameraTransform;
-            if (cam != null && _anchor!.transform.parent != cam)
-                _anchor.transform.SetParent(cam, false);
+            Transform? space = RetentionSpace;
+            if (space != null && _anchor!.transform.parent != space)
+                _anchor.transform.SetParent(space, false);
 
             float eased = Mathf.SmoothStep(0f, 1f, _blend);
 
@@ -832,10 +856,7 @@ namespace StanceOverhaul.SubSystem
             if (_fovSpace != null)
                 _fovSpace.localScale = Vector3.one; // first, so the reparent below keeps an unscaled pose
             if (_anchor != null)
-            {
-                Transform? cam = PlayerStateInstance.PWA?.HandsContainer?.CameraTransform;
-                _anchor.transform.SetParent(cam, true);
-            }
+                _anchor.transform.SetParent(RetentionSpace, true);
         }
 
         private static readonly FieldInfo _limbsField = AccessTools.Field(typeof(Player), "_limbs");
