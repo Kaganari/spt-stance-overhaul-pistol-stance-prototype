@@ -238,6 +238,9 @@ namespace StanceOverhaul.SubSystem
                 return;
             }
 
+            // Safety: the game resets its FOV squash at end of frame; never carry ours into a new frame.
+            UndoFovSquash();
+
             if (_pendingSpawnSkip != null)
                 RunPendingSpawnSkip();
 
@@ -776,6 +779,65 @@ namespace StanceOverhaul.SubSystem
             player.ThirdIkWeight.Value = 1f;
         }
 
+        // ---- FOV compensation mirror ----
+        // EFT squashes the first-person arms and in-hands weapon toward the body for rendering
+        // (ribcage local z scaled to 1..0.65 depending on FOV), then un-squashes at end of frame.
+        // IK runs unsquashed, so the hand is exactly on the copy's grip there, but on screen the hand
+        // was drawn squashed and the copy was not: the hand looked several inches short of the
+        // handguard. The copy now gets the same squash in the same window.
+        private Transform? _fovSpace;
+        private bool _fovSquashed;
+        private bool _fovLogged;
+
+        internal static void OnFovAdjustmentsApplied(Player player)
+        {
+            if (_instance != null && player != null && player.IsYourPlayer)
+                _instance.ApplyFovSquash(player);
+        }
+
+        internal static void OnFovAdjustmentsReset()
+        {
+            _instance?.UndoFovSquash();
+        }
+
+        private void ApplyFovSquash(Player player)
+        {
+            if (_state == ERetentionState.Idle || _anchor == null || _fovSquashed) return;
+
+            Transform ribcage = player.PlayerBones.Ribcage.Original;
+            float s = ribcage.localScale.z;
+            if (Mathf.Approximately(s, 1f)) return;
+
+            if (_fovSpace == null)
+                _fovSpace = new GameObject("RetainedRifleFovSpace").transform;
+
+            // Same pivot and axes the game scales the arms around (it has just set ribcage.rotation).
+            _fovSpace.localScale = Vector3.one;
+            _fovSpace.SetPositionAndRotation(ribcage.position, ribcage.rotation);
+            _anchor.transform.SetParent(_fovSpace, true);
+            _fovSpace.localScale = new Vector3(1f, 1f, s);
+            _fovSquashed = true;
+
+            if (!_fovLogged)
+            {
+                RifleRetentionDebug.Log($"FOV squash mirrored on copy: ribcage z-scale={s:F3}");
+                _fovLogged = true;
+            }
+        }
+
+        private void UndoFovSquash()
+        {
+            if (!_fovSquashed) return;
+            _fovSquashed = false;
+            if (_fovSpace != null)
+                _fovSpace.localScale = Vector3.one; // first, so the reparent below keeps an unscaled pose
+            if (_anchor != null)
+            {
+                Transform? cam = PlayerStateInstance.PWA?.HandsContainer?.CameraTransform;
+                _anchor.transform.SetParent(cam, true);
+            }
+        }
+
         private static readonly FieldInfo _limbsField = AccessTools.Field(typeof(Player), "_limbs");
         private const float REACH_MARGIN = 0.97f;
 
@@ -814,6 +876,7 @@ namespace StanceOverhaul.SubSystem
 
         private void Cleanup(string reason)
         {
+            UndoFovSquash(); // copy must be back under the camera before it is torn down
             _skipRemoveFor = null;
             _skipSpawnFor = null;
             _pendingSpawnSkip = null;
@@ -849,6 +912,13 @@ namespace StanceOverhaul.SubSystem
                     _disabledAnimator.enabled = true;
                 AssetPoolObject.ReturnToPool(_rifleModel);
             }
+
+            if (_fovSpace != null)
+            {
+                UnityEngine.Object.Destroy(_fovSpace.gameObject);
+                _fovSpace = null;
+            }
+            _fovLogged = false;
 
             if (_anchor != null)
                 UnityEngine.Object.Destroy(_anchor);

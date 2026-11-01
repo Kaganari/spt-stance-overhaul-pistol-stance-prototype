@@ -155,6 +155,39 @@ namespace StanceOverhaul.Patches
         }
     }
 
+    /// <summary>
+    /// Rifle retention: EFT squashes the first-person arms/weapon toward the body for rendering (FOV
+    /// compensation) and un-squashes at end of frame. Mirror that squash onto the retained rifle copy,
+    /// otherwise the hand is drawn short of the copy's handguard.
+    /// </summary>
+    public class RetentionFovApplyPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(FirstPersonStrategy), nameof(FirstPersonStrategy.ApplyFovAdjustments));
+        }
+
+        [PatchPostfix]
+        private static void Postfix(Player player)
+        {
+            StanceOverhaul.SubSystem.RifleRetentionSystem.OnFovAdjustmentsApplied(player);
+        }
+    }
+
+    public class RetentionFovResetPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(FirstPersonStrategy), nameof(FirstPersonStrategy.ResetFovAdjustments));
+        }
+
+        [PatchPostfix]
+        private static void Postfix()
+        {
+            StanceOverhaul.SubSystem.RifleRetentionSystem.OnFovAdjustmentsReset();
+        }
+    }
+
     /// <summary>Rifle retention debug only (no behaviour change): measures the left hand vs. its grip after the IK solve.</summary>
     public class RetentionDebugIkApplyPatch : ModulePatch
     {
