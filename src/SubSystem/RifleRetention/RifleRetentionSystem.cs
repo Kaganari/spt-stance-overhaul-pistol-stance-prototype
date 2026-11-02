@@ -338,6 +338,13 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         {
             // The player picked another slot themselves: drop the illusion right away.
             if (_ignoreSwapInput || _state == ERetentionState.Idle) return;
+            // The game ignores weapon keys while a swap is still running (this fires before it handles the
+            // key). Cancelling here would only drop our half of the swap, so let it finish, like vanilla.
+            if (PlayerStateInstance.Player?.InventoryController?.IsChangingWeapon == true)
+            {
+                RifleRetentionDebug.Log("weapon key ignored: swap still running");
+                return;
+            }
             Cleanup("manual weapon swap input");
         }
 
