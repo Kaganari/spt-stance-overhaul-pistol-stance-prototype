@@ -38,5 +38,20 @@
     retention the rifle's draw is skipped and the copy has already arrived, so it lands after the motion.
   - Options: keep the copy moving through the twitch (reveal after it, like vanilla), or damp the
     camera change during the return. Needs a trace of camera / Camera_animated motion around the reveal first.
+- [ ] **Faster swap that drains arm stamina** — maybe make the retention swap quicker and have it cost
+  stamina like the quick draw does.
+- [ ] **Interactions while holding the rifle** (doors, looting, picking up items) — the body plays the
+  left-hand interaction motion but the hand stays on the rifle. Decide what should happen (let the hand
+  go and come back, use the right hand, or block/lower the rifle first).
+- [ ] **Rifle copy feels glued to the screen** when turning fast or looking up/down: it is locked to the
+  camera rig (that is what fixed freelook), so it has none of the weapon sway. Options: copy the held
+  pistol's sway onto the copy (keeps the freelook fix), or anchor it to the body (more natural, but
+  risks bringing the freelook issue back).
+- [ ] **Pistol draw chambers a round while the rifle is held** — vanilla draw with an empty chamber and a
+  loaded magazine racks the slide; the left hand stays on the rifle. Blocking it would leave the pistol
+  empty (chambering later counts as a reload, which is blocked). Decide whether to keep it.
+- [ ] **Pistol's own draw key does nothing while holding the rifle** (vanilla: the key for the weapon
+  already in hands does nothing). Options: leave it, make it raise the rifle, or make it "go fully to
+  the pistol".
 - [ ] **Other players / Fika** see the stock rifle-on-back (retention is first-person only).
 - [ ] **Update `handoff.txt`** for the new `RifleRetention/` folder layout.
