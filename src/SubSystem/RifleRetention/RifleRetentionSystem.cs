@@ -346,6 +346,13 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             if (player == null || !player.IsYourPlayer) return;
             if (WeaponStateInstance.TreatAsPistol) return;
             if (!(player.HandsController?.Item is Weapon rifle)) return;
+            // Mid-reload, mid-inspect, mid-draw etc. the rifle is in some animation pose, and the copy
+            // would start from it. Only swap from a drawn, idle rifle.
+            if (!IsDrawnAndIdle(player.HandsController))
+            {
+                RifleRetentionDebug.Log("ignored: rifle is busy");
+                return;
+            }
             if (!TryGetRifleSlot(player.Equipment, rifle, out EquipmentSlot rifleSlot)) return;
             if (!(player.Equipment.GetSlot(EquipmentSlot.Holster).ContainedItem is Weapon pistol)) return;
 
