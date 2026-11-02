@@ -12,7 +12,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// PROTOTYPE: rifle-retained pistol transition.
     ///
     /// On keypress a <see cref="RetainedRifleCopy"/> is spawned exactly where the held rifle is, the real
-    /// rifle is hidden, its "put away" animation is skipped so the pistol draw starts immediately, and
+    /// rifle is hidden, its "put away" animation is skipped (<see cref="SwapAnimationSkipper"/>) so the
+    /// pistol draw starts immediately, and
     /// the copy drops from the held pose to the Patrol stance pose (+ tweaks). Returning reverses it: the
     /// copy rises while the game draws the hidden real rifle (draw animation skipped too), and the copy is
     /// swapped for the real rifle once it has settled onto it.
@@ -29,11 +30,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private const float SWAP_TIMEOUT = 5f;
 
-        // Skip windows, armed right before the slot request. Spawn is longer: the pistol holster
-        // animation plays before the rifle is spawned.
-        private const float SKIP_REMOVE_WINDOW = 1.5f;
-        private const float SKIP_SPAWN_WINDOW = 4f;
-
         // Raising: the real rifle is trusted after being drawn and idle for a few frames, then the copy
         // settles onto its live pose and is swapped for it.
         private const int REAL_POSE_MIN_FRAMES = 2;
@@ -45,10 +41,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private const float POST_REVEAL_TRACE_TIME = 1f;
 
         private static RifleRetentionSystem? _instance;
-        private static Weapon? _skipRemoveFor;
-        private static float _skipRemoveUntil;
-        private static Weapon? _skipSpawnFor;
-        private static float _skipSpawnUntil;
 
         private ERetentionState _state = ERetentionState.Idle;
         private Weapon? _rifle;
@@ -58,6 +50,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private ECharacterWeaponBones _anchorBone = ECharacterWeaponBones.weapon;
         private readonly HeldWeaponHider _hider = new HeldWeaponHider();
         private readonly PatrolPoseSolver _patrolPose = new PatrolPoseSolver();
+        private readonly SwapAnimationSkipper _skipper = new SwapAnimationSkipper();
 
         // What happens to two-handed weapon actions while retaining. Swap an entry to change one action.
         private readonly Dictionary<ERetentionAction, IRetentionActionPolicy> _actionPolicies = new Dictionary<ERetentionAction, IRetentionActionPolicy>
@@ -71,7 +64,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             { ERetentionAction.ClearMalfunction, BlockActionPolicy.Instance },
         };
 
-        private Player.FirearmController.SpawnOperation? _pendingSpawnSkip;
         private bool _ignoreSwapInput;
         private bool _pistolAppeared;
         private float _swapTimer;
@@ -118,8 +110,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             // Safety: the game resets its FOV squash at end of frame; never carry ours into a new frame.
             _copy?.UndoFovSquash();
 
-            if (_pendingSpawnSkip != null)
-                RunPendingSpawnSkip();
+            _skipper.RunPendingSpawn(_rifle);
 
             Player player = PlayerStateInstance.Player;
             if (player == null || _copy == null || !_copy.IsAlive || !RifleStillEquipped(player))
@@ -386,8 +377,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             UpdatePose(player, 0f);
 
             _pistolAppeared = false;
-            _skipRemoveFor = rifle;
-            _skipRemoveUntil = Time.time + SKIP_REMOVE_WINDOW;
+            _skipper.ArmRemove(rifle);
             RequestSlot(player, EquipmentSlot.Holster);
         }
 
@@ -415,8 +405,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _smoothedRotation = _copy.Anchor.localRotation;
             SetState(ERetentionState.Raising, "keypress");
 
-            _skipSpawnFor = _rifle;
-            _skipSpawnUntil = Time.time + SKIP_SPAWN_WINDOW;
+            _skipper.ArmSpawn(_rifle!);
             RequestSlot(player, _rifleSlot);
         }
 
@@ -454,9 +443,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private void EndRetention(string reason)
         {
-            _skipRemoveFor = null;
-            _skipSpawnFor = null;
-            _pendingSpawnSkip = null;
+            _skipper.Disarm();
             _realRifleReady = false;
             _realPosedFrames = 0;
             _pistolAppeared = false;
@@ -479,57 +466,19 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         /// <summary>IkProcess prefix: keep the left arm on the copy even when the swap animation frees the hand.</summary>
         internal static bool ForceLeftHandIK => _instance != null && _instance.IsActive && _instance._copy?.LeftGrip != null;
 
-        /// <summary>
-        /// Remove.Start postfix. True once for the rifle being retained, so its "put the rifle away"
-        /// animation is fast-forwarded and the pistol draw starts immediately.
-        /// </summary>
+        /// <summary>Remove.Start postfix. True when the rifle's "put away" animation should be fast-forwarded.</summary>
         internal static bool ConsumeSkipRemove(Player player, Weapon weapon)
         {
-            if (player == null || !player.IsYourPlayer) return false;
-
-            RifleRetentionDebug.Log($"Remove.Start weapon={RifleRetentionDebug.Name(weapon)} " +
-                $"armedFor={RifleRetentionDebug.Name(_skipRemoveFor)} windowLeft={_skipRemoveUntil - Time.time:F2}s");
-
-            if (_skipRemoveFor == null || !ReferenceEquals(weapon, _skipRemoveFor) || Time.time > _skipRemoveUntil) return false;
-            _skipRemoveFor = null;
-            RifleRetentionDebug.Log("  -> remove skipped (FastForward)");
-            return true;
+            if (player == null || !player.IsYourPlayer || _instance == null) return false;
+            return _instance._skipper.ConsumeRemove(weapon);
         }
 
-        /// <summary>
-        /// SpawnOperation.Start postfix, for the rifle being raised back: hides its model right away, before
-        /// it can render a single frame, and defers the fast-forward to the next Update so the game's swap
-        /// code has fully returned first.
-        /// </summary>
+        /// <summary>SpawnOperation.Start postfix: skips the draw of the rifle being raised back.</summary>
         internal static void ConsumeSkipSpawn(Player.FirearmController.SpawnOperation operation)
         {
             Player player = operation.Player;
             if (player == null || !player.IsYourPlayer || _instance == null) return;
-
-            RifleRetentionDebug.Log($"SpawnOperation.Start weapon={RifleRetentionDebug.Name(operation.Weapon)} " +
-                $"armedFor={RifleRetentionDebug.Name(_skipSpawnFor)} windowLeft={_skipSpawnUntil - Time.time:F2}s");
-
-            if (_skipSpawnFor == null || !ReferenceEquals(operation.Weapon, _skipSpawnFor) || Time.time > _skipSpawnUntil) return;
-            _skipSpawnFor = null;
-            _instance._hider.Hide(operation.Controller.ControllerGameObject);
-            _instance._pendingSpawnSkip = operation;
-            RifleRetentionDebug.Log($"  -> spawn skip armed (fast-forward next frame), hidden renderers={_instance._hider.Count}");
-        }
-
-        private void RunPendingSpawnSkip()
-        {
-            var operation = _pendingSpawnSkip;
-            _pendingSpawnSkip = null;
-            if (operation == null || !ReferenceEquals(operation.Weapon, _rifle)) return;
-
-            // The draw animation is what normally fires this (chambering a round from the magazine on
-            // draw); fire it ourselves so the ammo state matches. No-op when nothing was chambered.
-            operation.OnAddAmmoInChamber();
-            // Jumps the animator to idle and completes the draw (WeaponAppeared). No-op if already finished.
-            operation.FastForward();
-
-            RifleRetentionDebug.Log($"spawn skip run: op state={operation.State} animIdle={operation.FirearmsAnimator?.IsIdling()} " +
-                $"currentOp={operation.Controller.CurrentOperation?.GetType().Name} weaponIsReady={PlayerStateInstance.WeaponIsReady}");
+            _instance._skipper.ConsumeSpawn(operation, _instance._hider);
         }
 
         /// <summary>
