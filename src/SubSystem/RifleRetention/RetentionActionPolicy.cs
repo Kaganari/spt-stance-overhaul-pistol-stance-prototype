@@ -9,6 +9,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         Reload,
         CheckAmmo,
         CheckChamber,
+        UnloadMagazine,
         UnloadChamber,
         InspectWeapon,
         ClearMalfunction
@@ -36,7 +37,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         public bool CanStart(ERetentionAction action, Player.FirearmController controller)
         {
-            NotificationManager.DisplaySingletonWarningNotification($"Can't {Describe(action)} while holding the rifle");
+            NotificationManager.DisplaySingletonWarningNotification($"Can't {Describe(action)} one-handed");
             RifleRetentionDebug.Log($"{action} blocked on {RifleRetentionDebug.Name(controller.Item)}");
             return false;
         }
@@ -48,6 +49,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 case ERetentionAction.Reload: return "reload";
                 case ERetentionAction.CheckAmmo: return "check the magazine";
                 case ERetentionAction.CheckChamber: return "check the chamber";
+                case ERetentionAction.UnloadMagazine: return "unload the magazine";
                 case ERetentionAction.UnloadChamber: return "unload the chamber";
                 case ERetentionAction.InspectWeapon: return "inspect the weapon";
                 case ERetentionAction.ClearMalfunction: return "deal with the malfunction";

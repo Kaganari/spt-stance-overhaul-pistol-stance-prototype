@@ -141,6 +141,10 @@ namespace StanceOverhaul.Patches
                 case ECommand.CheckChamber:
                     // With a known malfunction this starts the repair.
                     return malfunctioned ? ERetentionAction.ClearMalfunction : ERetentionAction.CheckChamber;
+                case ECommand.UnloadMagazine:
+                    // With a feed malfunction this examines the malfunction instead.
+                    return controller.Item.MalfState.State == Weapon.EMalfunctionState.Feed
+                        ? ERetentionAction.ClearMalfunction : ERetentionAction.UnloadMagazine;
                 case ECommand.ChamberUnload:
                     return ERetentionAction.UnloadChamber;
                 case ECommand.ExamineWeapon:

@@ -65,6 +65,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             { ERetentionAction.Reload, BlockActionPolicy.Instance },
             { ERetentionAction.CheckAmmo, BlockActionPolicy.Instance },
             { ERetentionAction.CheckChamber, BlockActionPolicy.Instance },
+            { ERetentionAction.UnloadMagazine, BlockActionPolicy.Instance },
             { ERetentionAction.UnloadChamber, BlockActionPolicy.Instance },
             { ERetentionAction.InspectWeapon, BlockActionPolicy.Instance },
             { ERetentionAction.ClearMalfunction, BlockActionPolicy.Instance },
