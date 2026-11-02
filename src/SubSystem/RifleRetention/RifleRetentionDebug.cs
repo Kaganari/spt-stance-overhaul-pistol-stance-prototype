@@ -7,7 +7,8 @@ using static RealismCommonLib.Plugin;
 namespace StanceOverhaul.SubSystem.RifleRetention
 {
     /// <summary>
-    /// Diagnostic logging for the rifle retention prototype, gated behind the "Debug Logging" config toggle.
+    /// Diagnostic logging for the rifle retention prototype, gated behind the "Debug Logging" config toggle
+    /// (except <see cref="Warn"/>).
     /// Goes to BepInEx/LogOutput.log under "StanceOverhaul.Retention". Times are relative to the last
     /// retention keypress: "T+0.123 f12" = 0.123 s / 12 frames after it.
     /// </summary>
@@ -35,6 +36,12 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         {
             if (!Enabled) return;
             _log.LogInfo($"T+{Time.time - _t0:F3} f{Time.frameCount - _f0} | {message}");
+        }
+
+        /// <summary>Real problems, not diagnostics: always logged, whatever the Debug Logging toggle says.</summary>
+        public static void Warn(string message)
+        {
+            _log.LogWarning(message);
         }
 
         public static string Name(Item? item)

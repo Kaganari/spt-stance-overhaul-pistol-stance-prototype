@@ -228,7 +228,6 @@ namespace StanceOverhaul.Controllers
         private RifleRetentionSystem _rifleRetentionSystem;
 
         public bool IsRetainingRifle => _rifleRetentionSystem != null && _rifleRetentionSystem.IsActive;
-        public bool ForceRetentionLeftHandIK => _rifleRetentionSystem != null && _rifleRetentionSystem.ForceLeftHandIK;
 
         /// <summary>
         /// Rifle retention: put the weapon at rest right now. Clears the stance state with no exit

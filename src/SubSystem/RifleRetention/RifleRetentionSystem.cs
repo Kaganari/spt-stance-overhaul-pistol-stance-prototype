@@ -91,9 +91,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         public bool IsActive => _state != ERetentionState.Idle;
 
-        /// <summary>Read by the IK patch: keep the left arm on the copy even when the swap animation frees the hand.</summary>
-        public bool ForceLeftHandIK => _state != ERetentionState.Idle && _copy?.LeftGrip != null;
-
         public void RunOnAwake()
         {
             _instance = this;
@@ -105,7 +102,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         {
             StanceInputEvents.ToggleRifleRetention -= OnToggle;
             InputEvents.WeaponSwapInput -= OnManualSwap;
-            Cleanup("subsystem destroyed");
+            EndRetention("subsystem destroyed");
             if (_instance == this) _instance = null;
         }
 
@@ -127,7 +124,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             Player player = PlayerStateInstance.Player;
             if (player == null || _copy == null || !_copy.IsAlive || !RifleStillEquipped(player))
             {
-                Cleanup(player == null ? "no player" : _copy == null || !_copy.IsAlive ? "copy missing" : "rifle no longer in its slot");
+                EndRetention(player == null ? "no player" : _copy == null || !_copy.IsAlive ? "copy missing" : "rifle no longer in its slot");
                 return;
             }
 
@@ -170,7 +167,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _swapTimer += deltaTime;
             if (_swapTimer > SWAP_TIMEOUT || somethingElseInHands)
             {
-                Cleanup(_swapTimer > SWAP_TIMEOUT ? "lowering timeout" : "lowering: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                EndRetention(_swapTimer > SWAP_TIMEOUT ? "lowering timeout" : "lowering: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
                 return false;
             }
 
@@ -195,7 +192,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         {
             if (!pistolInHands)
             {
-                Cleanup("retained: pistol left hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                EndRetention("retained: pistol left hands (" + RifleRetentionDebug.Name(inHands) + ")");
                 return false;
             }
 
@@ -209,7 +206,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _swapTimer += deltaTime;
             if (_swapTimer > SWAP_TIMEOUT || somethingElseInHands)
             {
-                Cleanup(_swapTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                EndRetention(_swapTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
                 return false;
             }
 
@@ -257,9 +254,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             bool settled = distance < SETTLE_POS_EPSILON && angle < SETTLE_ANGLE_EPSILON;
             RifleRetentionDebug.Log($"settle check: t={_settleTimer:F3} d={distance * 1000f:F1}mm/{angle:F1}deg settled={settled}");
 
-            // Cleanup reveals the real rifle in the same frame the copy goes away.
+            // EndRetention reveals the real rifle in the same frame the copy goes away.
             if (settled || _settleTimer > SETTLE_MAX_TIME)
-                Cleanup(settled ? "REVEAL settled" : "REVEAL settle timeout");
+                EndRetention(settled ? "REVEAL settled" : "REVEAL settle timeout");
         }
 
         private void UpdatePose(Player player, float deltaTime)
@@ -345,7 +342,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 RifleRetentionDebug.Log("weapon key ignored: swap still running");
                 return;
             }
-            Cleanup("manual weapon swap input");
+            EndRetention("manual weapon swap input");
         }
 
         private void TryStartRetention()
@@ -376,7 +373,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _copy = RetainedRifleCopy.Spawn(player, rifle, space, heldBone, _heldPosition, _heldRotation);
             if (_copy == null)
             {
-                Cleanup("copy spawn failed");
+                EndRetention("copy spawn failed");
                 return;
             }
             _anchorBone = _copy.AnchorBone;
@@ -455,7 +452,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _state = newState;
         }
 
-        private void Cleanup(string reason)
+        private void EndRetention(string reason)
         {
             _skipRemoveFor = null;
             _skipSpawnFor = null;
@@ -478,6 +475,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         }
 
         // ---- Entry points for RifleRetentionPatches ----
+
+        /// <summary>IkProcess prefix: keep the left arm on the copy even when the swap animation frees the hand.</summary>
+        internal static bool ForceLeftHandIK => _instance != null && _instance.IsActive && _instance._copy?.LeftGrip != null;
 
         /// <summary>
         /// Remove.Start postfix. True once for the rifle being retained, so its "put the rifle away"

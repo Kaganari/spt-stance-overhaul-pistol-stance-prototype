@@ -8,7 +8,6 @@ using StanceOverhaul.SubSystem.RifleRetention;
 using System;
 using System.Reflection;
 using static RealismCommonLib.Plugin;
-using static StanceOverhaul.Plugin;
 
 namespace StanceOverhaul.Patches
 {
@@ -19,26 +18,23 @@ namespace StanceOverhaul.Patches
     /// </summary>
     public class RetentionLeftHandIKPatch : ModulePatch
     {
-        private static FieldInfo _limbsField = null!;
-
         protected override MethodBase GetTargetMethod()
         {
-            _limbsField = AccessTools.Field(typeof(Player), "_limbs");
             return AccessTools.Method(typeof(Player), nameof(Player.IkProcess));
         }
 
         [PatchPrefix]
         private static void Prefix(Player __instance)
         {
-            if (!__instance.IsYourPlayer || StanceControllerInstance == null || !StanceControllerInstance.ForceRetentionLeftHandIK)
+            if (!__instance.IsYourPlayer || !RifleRetentionSystem.ForceLeftHandIK)
                 return;
 
-            LimbIK[] limbs = (LimbIK[])_limbsField.GetValue(__instance);
-            if (limbs == null || limbs.Length == 0 || limbs[0] == null)
+            LimbIK? leftArm = LeftArmIK.Get(__instance);
+            if (leftArm == null)
                 return;
 
-            limbs[0].solver.IKPositionWeight = 1f;
-            limbs[0].solver.IKRotationWeight = 1f;
+            leftArm.solver.IKPositionWeight = 1f;
+            leftArm.solver.IKRotationWeight = 1f;
             if (__instance.HandPosers != null && __instance.HandPosers.Length > 0 && __instance.HandPosers[0] != null)
                 __instance.HandPosers[0].weight = 1f;
         }

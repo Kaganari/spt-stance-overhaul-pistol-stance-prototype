@@ -2,11 +2,9 @@ using Comfort.Common;
 using EFT;
 using EFT.AssetsManager;
 using EFT.InventoryLogic;
-using HarmonyLib;
 using RootMotion.FinalIK;
 using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using UnityEngine;
 using static RealismCommonLib.Plugin;
 
@@ -20,7 +18,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// </summary>
     internal class RetainedRifleCopy
     {
-        private static readonly FieldInfo _limbsField = AccessTools.Field(typeof(Player), "_limbs");
         private const float REACH_MARGIN = 0.97f;
 
         private readonly GameObject _model;
@@ -55,7 +52,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             var copy = new RetainedRifleCopy(model, space, heldBone, heldPosition, heldRotation);
             if (!copy.AttachLeftHand(player))
             {
-                Debug.LogWarning("[StanceOverhaul] Rifle retention: no left-hand grip point found on " + rifle.ShortName);
+                RifleRetentionDebug.Warn("no left-hand grip point found on " + rifle.ShortName);
                 copy.Destroy(player);
                 return null;
             }
@@ -213,8 +210,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             LastReachClampMm = 0f;
             if (!PluginConfig.RifleRetentionClampReach.Value || LeftGrip == null) return;
 
-            if (!(_limbsField.GetValue(player) is LimbIK[] limbs) || limbs.Length == 0 || limbs[0] == null) return;
-            var solver = limbs[0].solver;
+            LimbIK? leftArm = LeftArmIK.Get(player);
+            if (leftArm == null) return;
+            var solver = leftArm.solver;
             if (solver.bone1?.transform == null || solver.bone2?.transform == null || solver.bone3?.transform == null) return;
 
             Vector3 shoulder = solver.bone1.transform.position;
