@@ -38,19 +38,19 @@ Related files:
 ### Build
 
 ```
-dotnet build spt-stance-overhaul.csproj -c Release ^
-  "-p:CustomAfterMicrosoftCommonTargets=G:\mods\SPT\spt-stance-overhaul-pistol-stance-prototype\spt-paths.targets" ^
-  "-p:SptPath=G:\Games\EscapeFromTarkov_4.1.16" ^
-  "-p:RealismCommonLibDll=G:\Games\EscapeFromTarkov_4.1.16\BepInEx\plugins\Realism\spt-realism-common-lib.dll" ^
-  -p:SkipDeploy=true
+dotnet build spt-stance-overhaul.csproj -c Release
 ```
 
+- A local, untracked `Directory.Build.props` sets `SptPath`, `RealismCommonLibDll`, `SkipDeploy=true` and
+  imports `spt-paths.targets`. That retargets the csproj's hard-coded `F:\SP EFT\SPT-41X` reference paths
+  to this machine, for both builds and the IDE (VS Code), and keeps a plain build from deploying.
 - Then copy `bin/Release/netstandard2.1/spt-stance-overhaul.dll` and `curves.json` to
   `release/BepInEx/plugins/Realism/`.
-- Without `-p:SkipDeploy=true`, the build copies itself into the SPT install. Don't leave it off.
+- Never build with `SkipDeploy=false`: the build would copy itself into the SPT install.
 - The game log is at `G:\Games\EscapeFromTarkov_4.1.16\BepInEx\LogOutput.log`. With Debug Logging on,
   retention lines go to the `StanceOverhaul.Retention` source.
-- `spt-paths.targets` and `mod-compile-command.txt` are local helpers. They stay untracked.
+- `Directory.Build.props`, `spt-paths.targets` and `mod-compile-command.txt` are local helpers. They stay
+  untracked.
 
 ---
 
@@ -61,7 +61,7 @@ keybind (default None; the user binds it to 6).
 
 1. **Lowering:** with a rifle drawn and idle, press the key.
    - The holstered pistol is drawn one-handed.
-   - A visual copy of the rifle stays in the left hand and drops into the Patrol stance pose.
+   - A visual copy of the rifle stays in the left hand and drops into the retained pose (originally the Patrol stance's end pose).
    - There is no "put the rifle away" animation.
 2. **Raising:** press the key again.
    - The pistol is holstered and the copy rises.
@@ -82,7 +82,8 @@ While the rifle is retained:
 |---|---|
 | `RifleRetentionSystem.cs` (519) | The `ISubSystem`. It owns the state machine (Idle → Lowering → Retained → Raising → Idle), the key and weapon-key handlers, the slot swaps, the action-policy table, and the static entry points the patches call. Every exit path goes through `EndRetention(reason)`. |
 | `RetainedRifleCopy.cs` (318) | The visual-only rifle model. Spawn (colliders and animator off), alignment to the held rifle's weapon bone, left-hand grip choice and IK/fingers, arm-reach clamp, FOV squash mirror, and Destroy, which returns the model to the pool cleanly. |
-| `PatrolPoseSolver.cs` (105) | Computes the lowered pose. It snapshots the hands-spring state at keypress, minus the current stance, and replays the game's spring math with the Patrol curve end values plus the tweak sliders. It is re-evaluated every frame, so the sliders apply live. |
+| `LoweredPoseSolver.cs` (106) | Computes the lowered pose. It snapshots the hands-spring state at keypress, minus the current stance, and replays the game's spring math with a target offset passed in. It is re-evaluated every frame, so the sliders apply live. It knows nothing about stances. |
+| `RetainedRiflePose.cs` (22) | The retained pose itself: retention's own base position/rotation (taken from Patrol's end values) plus the tweak sliders. Retuning a stance doesn't move it. |
 | `SwapAnimationSkipper.cs` (91) | Skips the put-away animation (on lowering) and the draw animation (on raising) for the one armed rifle, each within a time window (1.5 s and 4 s). The draw skip is deferred to the next Update and fires `OnAddAmmoInChamber` + `FastForward`. |
 | `RetentionActionPolicy.cs` (60) | `ERetentionAction`, `IRetentionActionPolicy` and `BlockActionPolicy` (shows the hint and blocks). Each action has its own policy entry, so its behavior can change later without touching the rest. |
 | `RetentionSpace.cs` (47) | The reference space for every pose: the camera's parent, not `Cam`, so freelook and recoil don't move the copy. |

@@ -15,15 +15,29 @@ before any code changes. Many items come from test runs of the checklists in `do
 
 ## High priority
 
-- [ ] **Stance support (retained pose + entry stance)**
-  - The lowered pose is hardcoded to the Patrol stance. `PatrolPoseSolver` reads the
-    `StanceController.PatrolStance` curves plus the Patrol Pose Tweak sliders.
-  - Make it work with the other stances already in the mod (high/low ready, short stock, active aim, ...)
-    and with stances added later, **without changing the retention code each time**. Resolve the target
-    pose generically from the stance's own definition (`IStance` / curves) instead of naming a specific
-    stance.
-  - Also handle entering retention from a non-idle stance. Offsets are currently relative to whatever
-    stance the rifle was in at keypress.
+- [x] **Give the retained rifle its own pose, independent of the Patrol stance**
+  - It used to read the Patrol stance's curves, so retuning Patrol would have moved the retained rifle.
+  - Now `RetainedRiflePose` holds retention's own base values (Patrol's end values at the time) plus the
+    tweak sliders, and `LoweredPoseSolver` takes the target as input instead of naming a stance.
+- [ ] **Bake the tuned tweaks into the retained pose's base values**
+  - Once tuning is done, add the slider values into `RetainedRiflePose`'s base and decide whether the
+    sliders stay (as offsets from the new base, default 0), get renamed, or go away.
+  - The config keys are still named "Patrol Pose Tweak: ..." so tuned values carry over. Renaming them
+    resets everyone's saved values, so do it together with the baking.
+
+- [x] **Same retained pose from any stance**
+  - Tested: lowering from the default stance and from other stances gives the same retained pose.
+    `Capture` subtracts the current stance's spring contribution, so nothing needed fixing.
+
+- [ ] **Return to the previous stance when raising the rifle**
+  - Tested: the copy already rises back into the stance the rifle was in (it returns to the pose saved at
+    keypress), but the real rifle is then drawn into the default stance.
+  - Cause: while raising, `SnapStanceToRestForRetention` clears the stance and snaps the springs to rest
+    every frame (that is what fixed the return drift).
+  - Wanted: remember the stance at keypress and put the real rifle back in it.
+  - Must not change normal weapon switching: a regular swap doesn't remember the stance and always
+    starts in the default one. Only retention's own raise restores it.
+  - Careful: this is the same area as the drift fixes.
 
 - [ ] **Going fully to the pistol (dropping the retained rifle)**
   - Already allowed, but there is no animation: the rifle copy disappears from the hand and the left
@@ -69,12 +83,6 @@ before any code changes. Many items come from test runs of the checklists in `do
   - The sprint drops to a run for a moment, and nothing is drawn.
   - Wanted: allow it mid-sprint only if that doesn't add fragility. Otherwise the key should simply do
     nothing.
-
-- [ ] **Rifle copy feels glued to the screen** when turning fast or looking up/down
-  - It is locked to the camera rig (that is what fixed freelook), so it has none of the weapon sway.
-  - Options:
-    - Copy the held pistol's sway onto the copy. This keeps the freelook fix.
-    - Anchor the copy to the body. This is more natural, but risks bringing the freelook issue back.
 
 - [ ] **Tune the raise timing, then remove the temporary sliders**
   - The sliders are Rifle Raising Speed, Rifle Raising Final Speed and Rifle Raising Hold Point.

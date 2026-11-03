@@ -14,7 +14,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// On keypress a <see cref="RetainedRifleCopy"/> is spawned exactly where the held rifle is, the real
     /// rifle is hidden, its "put away" animation is skipped (<see cref="SwapAnimationSkipper"/>) so the
     /// pistol draw starts immediately, and
-    /// the copy drops from the held pose to the Patrol stance pose (+ tweaks). Returning reverses it: the
+    /// the copy drops from the held pose to the retained pose (<see cref="RetainedRiflePose"/>). Returning reverses it: the
     /// copy rises while the game draws the hidden real rifle (draw animation skipped too), and the copy is
     /// swapped for the real rifle once it has settled onto it.
     /// </summary>
@@ -49,7 +49,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private RetainedRifleCopy? _copy;
         private ECharacterWeaponBones _anchorBone = ECharacterWeaponBones.weapon;
         private readonly HeldWeaponHider _hider = new HeldWeaponHider();
-        private readonly PatrolPoseSolver _patrolPose = new PatrolPoseSolver();
+        private readonly LoweredPoseSolver _loweredPose = new LoweredPoseSolver();
         private readonly SwapAnimationSkipper _skipper = new SwapAnimationSkipper();
 
         // What happens to two-handed weapon actions while retaining. Swap an entry to change one action.
@@ -255,7 +255,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             float eased = Mathf.SmoothStep(0f, 1f, _blend);
 
             // Re-evaluated every frame: picks up tweak slider changes.
-            if (!_patrolPose.TryEvaluate(out Vector3 loweredPos, out Quaternion loweredRot))
+            if (!_loweredPose.TryEvaluate(RetainedRiflePose.Position, RetainedRiflePose.Rotation, out Vector3 loweredPos, out Quaternion loweredRot))
             {
                 loweredPos = _heldPosition;
                 loweredRot = _heldRotation;
@@ -368,7 +368,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 return;
             }
             _anchorBone = _copy.AnchorBone;
-            _patrolPose.Capture(space, heldBone);
+            _loweredPose.Capture(space, heldBone);
 
             _hider.Hide(player.HandsController?.ControllerGameObject);
             _blend = 0f;
@@ -448,7 +448,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _realPosedFrames = 0;
             _pistolAppeared = false;
             _settleTimer = 0f;
-            _patrolPose.Reset();
+            _loweredPose.Reset();
             _hider.RestoreAll();
 
             _copy?.Destroy(PlayerStateInstance.Player);

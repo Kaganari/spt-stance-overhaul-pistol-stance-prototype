@@ -4,12 +4,14 @@ using static RealismCommonLib.Plugin;
 namespace StanceOverhaul.SubSystem.RifleRetention
 {
     /// <summary>
-    /// Where the held rifle would sit in the Patrol stance (+ config tweaks), in <see cref="RetentionSpace"/>.
+    /// Where the held rifle would sit with a given stance offset applied, in <see cref="RetentionSpace"/>.
     /// Snapshots the hands-spring state at keypress with the current stance's contribution removed, then
     /// replays the game's spring math: position offset on WeaponRootAnim, then rotation around
-    /// RotationCenter. Evaluated every frame, so the tweak sliders are live after the rifle left the hands.
+    /// RotationCenter. The target offset is passed in on every evaluation, so it can change live (tweak
+    /// sliders) after the rifle left the hands. It knows nothing about which pose is asked for; see
+    /// <see cref="RetainedRiflePose"/>.
     /// </summary>
-    internal class PatrolPoseSolver
+    internal class LoweredPoseSolver
     {
         private bool _isValid;
 
@@ -32,7 +34,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             var stances = Plugin.StanceControllerInstance;
             Transform wra = hands.WeaponRootAnim;
             Transform? parent = wra != null ? wra.parent : null;
-            if (wra == null || parent == null || stances == null || stances.PatrolStance == null)
+            if (wra == null || parent == null || stances == null)
             {
                 _isValid = false;
                 return false;
@@ -67,22 +69,17 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _isValid = false;
         }
 
-        public bool TryEvaluate(out Vector3 position, out Quaternion rotation)
+        /// <param name="targetPosition">Stance position offset, in the same units and axes as the stance curves.</param>
+        /// <param name="targetRotation">Stance rotation offset (degrees), same axes as the stance curves.</param>
+        public bool TryEvaluate(Vector3 targetPosition, Vector3 targetRotation, out Vector3 position, out Quaternion rotation)
         {
             position = Vector3.zero;
             rotation = Quaternion.identity;
-
-            var stances = Plugin.StanceControllerInstance;
-            if (!_isValid || stances == null || stances.PatrolStance == null)
+            if (!_isValid)
                 return false;
 
-            Vector3 patrolPos = stances.PatrolStance.EnterPositionCurve.Evaluate(1f) + new Vector3(
-                PluginConfig.RifleRetentionPosX.Value, PluginConfig.RifleRetentionPosY.Value, PluginConfig.RifleRetentionPosZ.Value);
-            Vector3 patrolRot = stances.PatrolStance.EnterRotationCurve.Evaluate(1f) + new Vector3(
-                PluginConfig.RifleRetentionPitch.Value, PluginConfig.RifleRetentionYaw.Value, PluginConfig.RifleRetentionRoll.Value);
-
-            Vector3 tgtPosTotal = _nonStancePos + patrolPos;
-            Vector3 tgtRotTotal = _nonStanceRot + patrolRot;
+            Vector3 tgtPosTotal = _nonStancePos + targetPosition;
+            Vector3 tgtRotTotal = _nonStanceRot + targetRotation;
 
             Quaternion tgtRot = SpringEuler(tgtRotTotal) * _baseRot;
             Vector3 tgtPos = _prePivotPos + (tgtPosTotal - _curPosTotal)
