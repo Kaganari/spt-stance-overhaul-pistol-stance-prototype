@@ -1,35 +1,30 @@
 # Rifle Retention — TODO
 
-`[x]` done, `[ ]` open. Fixes are done one at a time and tested in game before the next one. They are only
+✅ done, 🔴 open. Fixes are done one at a time and tested in game before the next one. They are only
 grouped when they share a cause. Items marked *needs a log* need one swap captured with Debug Logging on
 before any code changes. Many items come from test runs of the checklists in `docs/testing/`.
 
 ## Code cleanup
 
-- [x] Split the prototype into the `RifleRetention/` subsystem folder (no behavior change).
-- [x] Tidy the wiring: the IK patch asks the system directly, one shared left-arm IK accessor, the
+- ✅ Split the prototype into the `RifleRetention/` subsystem folder (no behavior change).
+- ✅ Tidy the wiring: the IK patch asks the system directly, one shared left-arm IK accessor, the
   missing-grip warning always logs, `Cleanup` renamed to `EndRetention`.
-- [x] Move the swap animation skipping into `SwapAnimationSkipper`, with per-instance state instead of
+- ✅ Move the swap animation skipping into `SwapAnimationSkipper`, with per-instance state instead of
   static fields.
-- [ ] Restructure into a self-contained feature module, on a separate branch.
+- 🔴 Restructure into a self-contained feature module, on a separate branch.
 
 ## High priority
 
-- [x] **Give the retained rifle its own pose, independent of the Patrol stance**
+- ✅ **Give the retained rifle its own pose, independent of the Patrol stance**
   - It used to read the Patrol stance's curves, so retuning Patrol would have moved the retained rifle.
   - Now `RetainedRiflePose` holds retention's own base values (Patrol's end values at the time) plus the
     tweak sliders, and `LoweredPoseSolver` takes the target as input instead of naming a stance.
-- [ ] **Bake the tuned tweaks into the retained pose's base values**
-  - Once tuning is done, add the slider values into `RetainedRiflePose`'s base and decide whether the
-    sliders stay (as offsets from the new base, default 0), get renamed, or go away.
-  - The config keys are still named "Patrol Pose Tweak: ..." so tuned values carry over. Renaming them
-    resets everyone's saved values, so do it together with the baking.
 
-- [x] **Same retained pose from any stance**
+- ✅ **Same retained pose from any stance**
   - Tested: lowering from the default stance and from other stances gives the same retained pose.
     `Capture` subtracts the current stance's spring contribution, so nothing needed fixing.
 
-- [x] **Return to the previous stance when raising the rifle**
+- ✅ **Return to the previous stance when raising the rifle**
   - The copy already rose back into the old stance, but the real rifle was drawn into the default one:
     while raising, the hidden rifle was snapped to rest every frame.
   - Now the stance at keypress is remembered. While raising, the hidden rifle is held in that stance
@@ -38,13 +33,20 @@ before any code changes. Many items come from test runs of the checklists in `do
   - Normal weapon switching is unchanged: it still resets to the default stance. A cancelled retention
     doesn't restore the stance either.
 
-- [ ] **Going fully to the pistol (dropping the retained rifle)**
-  - Already allowed, but there is no animation: the rifle copy disappears from the hand and the left
-    hand teleports onto the pistol. Quick-draw also drops the copy instantly.
-  - Needs a transition: the rifle goes away (slung or to the back) and the left hand moves to the pistol
-    smoothly.
+- 🔴 **Going fully to the pistol**
+  - Now: while the rifle is retained, the quick-draw key switches fully to the pistol, but the rifle
+    copy disappears instantly, in one frame. The normal pistol key does nothing.
+  - Wanted:
+    - A transition: the rifle goes away (slung or to the back) and the left hand moves onto the pistol.
+    - Both keys do the same thing: go fully to the pistol.
+    - Each key maps to an intent that decides what it does, so they can be given different behaviors
+      later with a one-line change.
+  - Do both together: routing the pistol key before the transition exists would only spread the
+    instant disappearance.
+  - First check why the two keys behave differently (likely: quick-draw goes through the weapon-swap
+    input retention listens to, the pistol key for the item already in hands is filtered out earlier).
 
-- [x] **Block two-handed weapon actions while retaining**
+- ✅ **Block two-handed weapon actions while retaining**
   - Blocked with an on-screen hint ("Can't … one-handed"):
     - reload (keys, no-spare-mag chambering, inventory drag-and-drop)
     - check magazine, check chamber
@@ -57,7 +59,7 @@ before any code changes. Many items come from test runs of the checklists in `do
     `RifleRetentionSystem`), so it can get a different behavior later without touching the rest.
   - Tested in depth with the action-blocking checklist.
 
-- [x] **Retention key pressed while the rifle is busy**
+- ✅ **Retention key pressed while the rifle is busy**
   - Reports:
     - Mid-reload, mid-inspect or mid-chamber-check: the pistol drew mid-animation and the copy lowered
       from the half-animated pose.
@@ -66,7 +68,7 @@ before any code changes. Many items come from test runs of the checklists in `do
   - Fix: the key is ignored unless the rifle is drawn and idle (the same check raising uses).
   - Pressing the key while aiming does nothing. It never worked before, and that is accepted.
 
-- [x] **Weapon keys pressed during lowering / raising picked the wrong weapon**
+- ✅ **Weapon keys pressed during lowering / raising picked the wrong weapon**
   - The game itself ignores weapon keys while a swap is running (vanilla). Retention still cancelled
     itself on those keys:
     - During lowering: the copy vanished and only the pistol was left.
@@ -75,27 +77,36 @@ before any code changes. Many items come from test runs of the checklists in `do
   - Not done: remembering the pressed slot and switching to it afterwards. It needs more code and more
     states.
 
-- [ ] **Underbarrel launcher selected: the swap away takes longer** — *needs a log*
+- 🔴 **Finish tuning, then bake the values in and clean up the tuning sliders**
+  - Two groups of sliders still stand in for final values:
+    - Rifle Raising Speed, Rifle Raising Final Speed and Rifle Raising Hold Point (raise timing). They
+      are marked TEMP and go away once their values are baked in as constants.
+    - Patrol Pose Tweak position/rotation X/Y/Z (retained pose). Their values get added into
+      `RetainedRiflePose`'s base. Decide whether they stay as fine-tuning offsets (default 0, renamed),
+      or go away too.
+  - Do both in one pass: any renamed or removed config entry resets saved values, so users' configs
+    change only once.
+
+## Low priority
+
+- 🔴 **Underbarrel launcher selected: the swap away takes longer** — *needs a log*
   - Guess: the game switches out of launcher mode first, or the instant put-away doesn't apply there.
 
-- [ ] **Retention key pressed while sprinting** — *needs a log*
+- 🔴 **Retention key pressed while sprinting** — *needs a log*
   - The sprint drops to a run for a moment, and nothing is drawn.
   - Wanted: allow it mid-sprint only if that doesn't add fragility. Otherwise the key should simply do
     nothing.
 
-- [ ] **Tune the raise timing, then remove the temporary sliders**
-  - The sliders are Rifle Raising Speed, Rifle Raising Final Speed and Rifle Raising Hold Point.
-  - Bake the chosen values in as defaults/constants.
-
-## Low priority
-
-- [ ] **MP7 without a foregrip: the thumb goes inside the gun** — *needs a log of lowering it*
+- 🔴 **MP7 without a foregrip: the thumb goes inside the gun** — *needs a log of lowering it*
   - Likely the grip point picked on that weapon, or the finger posing.
-- [ ] **Revolver hint wording**
+
+- 🔴 **Revolver hint wording**
   - On a revolver, the unload chamber key rolls the cylinder. It is already blocked, but the hint says
     "Can't unload the chamber". Maybe reword it for revolvers.
-- [ ] **Clean up weapon lights / lasers on the retained copy.** They work now, but are a bit janky.
-- [ ] **Camera and gun twitch at the end of the rifle return** (maybe not worth fixing)
+
+- 🔴 **Clean up weapon lights / lasers on the retained copy.** They work now, but are a bit janky.
+
+- 🔴 **Camera and gun twitch at the end of the rifle return** (maybe not worth fixing)
   - Base game behavior: the camera and the gun twitch at the end of every weapon draw, strongest with
     shotguns.
   - In vanilla it happens while the gun is still moving, so only the screen twitch is noticeable. With
@@ -105,19 +116,20 @@ before any code changes. Many items come from test runs of the checklists in `do
     - Keep the copy moving through the twitch and reveal after it, like vanilla.
     - Damp the camera change during the return.
   - Either way, it needs a trace of the camera / Camera_animated motion around the reveal first.
-- [ ] **Faster swap that drains arm stamina.** Maybe make the retention swap quicker and have it cost
+
+- 🔴 **Faster swap that drains arm stamina.** Maybe make the retention swap quicker and have it cost
   stamina, like the quick draw does.
-- [ ] **Interactions while holding the rifle** (doors, looting, picking up items)
+
+- 🔴 **Interactions while holding the rifle** (doors, looting, picking up items)
   - The body plays the left-hand interaction motion, but the hand stays on the rifle.
   - Decide what should happen: let the hand go and come back, use the right hand, or block/lower the
     rifle first.
-- [ ] **Pistol draw chambers a round while the rifle is held**
+
+- 🔴 **Pistol draw chambers a round while the rifle is held**
   - A vanilla draw with an empty chamber and a loaded magazine racks the slide, while the left hand
     stays on the rifle.
   - Blocking it would leave the pistol empty, because chambering later counts as a reload, which is
     blocked.
   - Decide whether to keep it.
-- [ ] **Pistol's own draw key does nothing while holding the rifle.** In vanilla, the key for the weapon
-  already in hands does nothing. Options: leave it, make it raise the rifle, or make it "go fully to the
-  pistol".
-- [ ] **Other players / Fika** see the stock rifle-on-back (retention is first-person only).
+
+- 🔴 **Other players / Fika** see the stock rifle-on-back (retention is first-person only).
