@@ -17,7 +17,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// pistol draw starts immediately, and the copy drops from the held pose to the retained pose
     /// (<see cref="RetainedRiflePose"/>). Returning reverses it: the copy rises while the game draws the
     /// hidden real rifle (draw animation skipped too), and the copy is swapped for the real rifle once it
-    /// has settled onto it.
+    /// has settled onto it. A weapon key while retained puts the rifle away instead: the left hand takes the
+    /// copy down out of view (<see cref="RifleAwayPose"/>), then lets go and returns to the pistol.
     /// </summary>
     internal class RifleRetentionSystem : ISubSystem
     {
@@ -26,7 +27,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             Idle,
             Lowering,   // copy dropping, game swapping rifle -> pistol
             Retained,   // pistol ready, copy held low
-            Raising     // copy rising, game swapping pistol -> rifle
+            Raising,    // copy rising, game swapping pistol -> rifle
+            Dismissing  // weapon key while retained: copy put away with the left hand, then the hand lets go
         }
 
         private const float SWAP_TIMEOUT = 5f;
@@ -84,6 +86,16 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private float _postRevealTraceUntil;
 
+        // Dismissing: the left hand takes the copy from where it was to RifleAwayPose (out of view), the copy
+        // is hidden there, then the hand lets go and returns to the pistol.
+        private float _dismissElapsed;
+        private float _releaseElapsed;
+        private bool _copyHidden;
+        private bool _dismissFromCaptured;
+        private Vector3 _dismissFromPosition;
+        private Quaternion _dismissFromRotation;
+        private bool _leftHandReleased;
+
         public bool IsActive => _state != ERetentionState.Idle;
 
         public void RunOnAwake()
@@ -139,6 +151,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 case ERetentionState.Retained:
                     stillActive = UpdateRetained(pistolInHands, inHands, deltaTime);
                     break;
+                case ERetentionState.Dismissing:
+                    stillActive = UpdateDismissing(deltaTime);
+                    break;
                 default:
                     stillActive = UpdateRaising(handsController, rifleInHands, somethingElseInHands, inHands, deltaTime);
                     break;
@@ -193,6 +208,29 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _blend = Mathf.MoveTowards(_blend, 1f, deltaTime * PluginConfig.RifleRetentionBlendSpeed.Value);
             return true;
         }
+
+        private bool UpdateDismissing(float deltaTime)
+        {
+            _dismissElapsed += deltaTime;
+            if (DismissProgress < 1f) return true;
+
+            // Out of view by now: hiding it can't be seen. The hand still holds its grip point.
+            if (!_copyHidden)
+            {
+                _copy!.HideModel();
+                _copy.PlaySound("HandOff");
+                _copyHidden = true;
+                RifleRetentionDebug.Log("dismiss: rifle out of view, hidden; left hand letting go");
+            }
+
+            _releaseElapsed += deltaTime;
+            if (!_leftHandReleased) return true;
+
+            EndRetention("dismissed");
+            return false;
+        }
+
+        private float DismissProgress => Mathf.Clamp01(_dismissElapsed * PluginConfig.RifleRetentionDismissSpeed.Value);
 
         private bool UpdateRaising(Player.AbstractHandsController? handsController, bool rifleInHands,
             bool somethingElseInHands, Item? inHands, float deltaTime)
@@ -260,10 +298,20 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private void UpdatePose(Player player, float deltaTime)
         {
+            if (_state == ERetentionState.Dismissing)
+            {
+                UpdateDismissPose(player);
+                return;
+            }
+
             float eased = Mathf.SmoothStep(0f, 1f, _blend);
 
             // Re-evaluated every frame: picks up tweak slider changes.
-            if (!_loweredPose.TryEvaluate(RetainedRiflePose.Position, RetainedRiflePose.Rotation, out Vector3 loweredPos, out Quaternion loweredRot))
+            // TEMP (tuning): the preview toggle holds the rifle at the away pose instead.
+            bool preview = PluginConfig.RifleRetentionPreviewAwayPose.Value;
+            Vector3 targetPos = preview ? RifleAwayPose.Position : RetainedRiflePose.Position;
+            Vector3 targetRot = preview ? RifleAwayPose.Rotation : RetainedRiflePose.Rotation;
+            if (!_loweredPose.TryEvaluate(targetPos, targetRot, out Vector3 loweredPos, out Quaternion loweredRot))
             {
                 loweredPos = _heldPosition;
                 loweredRot = _heldRotation;
@@ -293,8 +341,43 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             }
 
             _copy!.SetLocalPose(pos, rot);
-            _copy.ClampToArmReach(player, eased);
+            if (!PluginConfig.RifleRetentionPreviewAwayPose.Value) // the real put-away isn't clamped either
+                _copy.ClampToArmReach(player, eased);
             _copy.HoldWithLeftHand(player);
+        }
+
+        private void UpdateDismissPose(Player player)
+        {
+            // Captured here, not on the key press: input runs mid-frame, the pose is only final after Update.
+            if (!_dismissFromCaptured)
+            {
+                _dismissFromPosition = _copy!.Anchor.localPosition;
+                _dismissFromRotation = _copy.Anchor.localRotation;
+                _dismissFromCaptured = true;
+            }
+
+            // A fixed end pose, so it always ends out of view whatever the retained pose is tuned to.
+            if (!_loweredPose.TryEvaluate(RifleAwayPose.Position, RifleAwayPose.Rotation, out Vector3 awayPos, out Quaternion awayRot))
+            {
+                awayPos = _dismissFromPosition;
+                awayRot = _dismissFromRotation;
+            }
+
+            float eased = Mathf.SmoothStep(0f, 1f, DismissProgress);
+            _copy!.SetLocalPose(Vector3.Lerp(_dismissFromPosition, awayPos, eased),
+                Quaternion.Slerp(_dismissFromRotation, awayRot, eased));
+
+            // The hand keeps holding the rifle on its way down, and only lets go once it is out of view.
+            if (!_copyHidden)
+            {
+                _copy.HoldWithLeftHand(player);
+                return;
+            }
+
+            float releaseTime = PluginConfig.RifleRetentionHandReleaseTime.Value;
+            float handWeight = releaseTime > 0f ? 1f - Mathf.Clamp01(_releaseElapsed / releaseTime) : 0f;
+            _copy.ReleaseLeftHand(player, handWeight);
+            _leftHandReleased = handWeight <= 0f;
         }
 
         private bool TrySampleRealRiflePose(out Vector3 position, out Quaternion rotation)
@@ -332,8 +415,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private void OnManualSwap()
         {
-            // The player picked another slot themselves: drop the illusion right away.
             if (_ignoreSwapInput || _state == ERetentionState.Idle) return;
+            // Already letting go of the rifle: let that finish.
+            if (_state == ERetentionState.Dismissing) return;
             // The game ignores weapon keys while a swap is still running (this fires before it handles the
             // key). Cancelling here would only drop our half of the swap, so let it finish, like vanilla.
             if (PlayerStateInstance.Player?.InventoryController?.IsChangingWeapon == true)
@@ -341,7 +425,27 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 RifleRetentionDebug.Log("weapon key ignored: swap still running");
                 return;
             }
+            // A weapon key while retained (quick-draw: fully to the pistol; a primary key: another weapon):
+            // let go of the rifle instead of dropping it in one frame.
+            if (_state == ERetentionState.Retained)
+            {
+                StartDismissing();
+                return;
+            }
+            // Mid lowering/raising (only when no swap is running): drop the illusion right away.
             EndRetention("manual weapon swap input");
+        }
+
+        private void StartDismissing()
+        {
+            _dismissElapsed = 0f;
+            _releaseElapsed = 0f;
+            _copyHidden = false;
+            _dismissFromCaptured = false;
+            _leftHandReleased = false;
+            SetState(ERetentionState.Dismissing, "weapon key while retained");
+            // The rifle's own put-away sound; its "hand off" plays once the hand lets go.
+            _copy?.PlaySound("Holster");
         }
 
         private void TryStartRetention()
@@ -458,6 +562,11 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _realPosedFrames = 0;
             _pistolAppeared = false;
             _settleTimer = 0f;
+            _dismissElapsed = 0f;
+            _releaseElapsed = 0f;
+            _copyHidden = false;
+            _dismissFromCaptured = false;
+            _leftHandReleased = false;
             _loweredPose.Reset();
             _hider.RestoreAll();
 
@@ -474,8 +583,12 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         // ---- Entry points for RifleRetentionPatches ----
 
-        /// <summary>IkProcess prefix: keep the left arm on the copy even when the swap animation frees the hand.</summary>
-        internal static bool ForceLeftHandIK => _instance != null && _instance.IsActive && _instance._copy?.LeftGrip != null;
+        /// <summary>
+        /// IkProcess prefix: keep the left arm on the copy even when the swap animation frees the hand, until
+        /// the hand has let go of it (dismissing).
+        /// </summary>
+        internal static bool ForceLeftHandIK => _instance != null && _instance.IsActive && _instance._copy?.LeftGrip != null
+            && !_instance._leftHandReleased;
 
         /// <summary>Remove.Start postfix. True when the rifle's "put away" animation should be fast-forwarded.</summary>
         internal static bool ConsumeSkipRemove(Player player, Weapon weapon)

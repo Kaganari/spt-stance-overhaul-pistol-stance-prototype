@@ -21,6 +21,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private const float REACH_MARGIN = 0.97f;
 
         private readonly GameObject _model;
+        private readonly HeldWeaponHider _modelHider = new HeldWeaponHider();
         private readonly GameObject _anchor;
         private GameObject? _fallbackGripGO;
         private UnityEngine.Animator? _disabledAnimator;
@@ -89,6 +90,58 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         {
             player.LeftHandInteractionTarget = LeftGrip;
             player.ThirdIkWeight.Value = 1f;
+        }
+
+        /// <summary>
+        /// Plays one of the weapon's own handling sounds, by the animation event name the game uses for it
+        /// (e.g. "Holster", "HandOff"; the model lists them as "SndHolster", ...). The copy has no animator
+        /// driving its sound player, so the clip is looked up and played directly, first person, on the
+        /// weaponry channel like the game's own weapon sounds.
+        /// </summary>
+        public void PlaySound(string eventName)
+        {
+            BaseSoundPlayer? soundPlayer = _model.GetComponentInChildren<BaseSoundPlayer>(true);
+            BaseSoundPlayer.SoundElement? sound = soundPlayer?.AdditionalSounds
+                .Find(s => s != null && (s.EventName == eventName || s.EventName == "Snd" + eventName));
+            AudioClip? clip = sound?.RandomSoundClip;
+            if (clip == null || !Singleton<BetterAudio>.Instantiated)
+            {
+                RifleRetentionDebug.Log($"no '{eventName}' sound on {_model.name}");
+                return;
+            }
+
+            Singleton<BetterAudio>.Instance.PlayNonspatial(clip, BetterAudio.AudioSourceGroupType.Weaponry, 0f, sound!.Volume);
+        }
+
+        /// <summary>Hides the model (renderers only): the left hand can still hold its grip point.</summary>
+        public void HideModel()
+        {
+            _modelHider.Hide(_model);
+        }
+
+        /// <summary>
+        /// Letting go: the fingers release, and the left hand's pull toward the grip fades to
+        /// <paramref name="weight"/> (1 = on the grip, 0 = back to whatever the hands animation does).
+        /// </summary>
+        public void ReleaseLeftHand(Player player, float weight)
+        {
+            if (_fingersMapped && player.HandPosers != null && player.HandPosers.Length > 0)
+            {
+                player.HandPosers[0].MapIkPalm(null);
+                _fingersMapped = false;
+            }
+
+            if (LeftGrip == null) return;
+            if (weight > 0f)
+            {
+                player.LeftHandInteractionTarget = LeftGrip;
+                player.ThirdIkWeight.Value = weight;
+            }
+            else if (player.LeftHandInteractionTarget == LeftGrip)
+            {
+                player.LeftHandInteractionTarget = null;
+                player.ThirdIkWeight.Value = 0f;
+            }
         }
 
         private void PrepareModel()
@@ -298,6 +351,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 }
                 if (_disabledAnimator != null)
                     _disabledAnimator.enabled = true;
+                _modelHider.RestoreAll();
                 AssetPoolObject.ReturnToPool(_model);
             }
 

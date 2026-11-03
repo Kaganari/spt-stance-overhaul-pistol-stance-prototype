@@ -4,10 +4,10 @@ using UnityEngine;
 namespace StanceOverhaul.SubSystem.RifleRetention
 {
     /// <summary>
-    /// Hides the real first-person weapon (the hands controller's object; the arms are a separate body
-    /// skin) while the copy stands in for it. Everything hidden MUST be restored before the object can be
-    /// reused: the game pools first-person weapon models, so one returned with its renderers off would be
-    /// invisible the next time it is drawn.
+    /// Hides a first-person weapon model: the real weapon (the hands controller's object; the arms are a
+    /// separate body skin) while the copy stands in for it, or the copy itself once it is out of view.
+    /// Everything hidden MUST be restored before the object can be reused: the game pools first-person
+    /// weapon models, so one returned with its renderers off would be invisible the next time it is drawn.
     /// </summary>
     internal class HeldWeaponHider
     {

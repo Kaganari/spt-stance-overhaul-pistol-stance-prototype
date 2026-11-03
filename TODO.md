@@ -34,12 +34,16 @@ checklists in `docs/testing/`.
   - Normal weapon switching is unchanged: it still resets to the default stance. A cancelled retention
     doesn't restore the stance either.
 
-- 🔴 **Going fully to the pistol: animate the rifle going away**
-  - Now: while the rifle is retained, the quick-draw key switches fully to the pistol, but the rifle
-    copy disappears instantly, in one frame, and the left hand teleports onto the pistol.
-  - Wanted: a transition. The rifle goes away (slung or to the back) and the left hand moves onto the
-    pistol smoothly.
-  - Doesn't depend on the lib change below: quick-draw already reaches retention today.
+- ✅ **Putting the retained rifle away: animate it instead of dropping it in one frame**
+  - Was: a weapon key while retained (quick-draw, or a primary weapon key) removed the copy in one frame
+    and the left hand teleported onto the pistol.
+  - Now: the left hand takes the rifle down, twisted and a bit to the left, out of view
+    (`RifleAwayPose`, a fixed pose so it always ends out of view whatever the retained pose is tuned to).
+    The rifle is hidden there, then the hand lets go and comes back onto the pistol. The rifle's own
+    Holster sound plays as it starts going away, its HandOff when the hand lets go.
+  - Error exits are still instant. Tuning is part of the "Finish tuning" item below.
+  - Raising plays only the pistol's holster sounds (the rifle's draw is skipped, so its Draw/HandOn
+    don't fire). Tested: it sounds fine, kept as is.
 
 - 🟡 **Normal pistol key should also go fully to the pistol** — *waiting on a RealismCommonLib change*
   - Now: the normal pistol key does nothing while the rifle is retained; quick-draw goes fully to the
@@ -97,14 +101,16 @@ checklists in `docs/testing/`.
     states.
 
 - 🔴 **Finish tuning, then bake the values in and clean up the tuning sliders**
-  - Two groups of sliders still stand in for final values:
+  - Three groups of sliders still stand in for final values:
     - Rifle Raising Speed, Rifle Raising Final Speed and Rifle Raising Hold Point (raise timing). They
       are marked TEMP and go away once their values are baked in as constants.
     - Patrol Pose Tweak position/rotation X/Y/Z (retained pose). Their values get added into
       `RetainedRiflePose`'s base. Decide whether they stay as fine-tuning offsets (default 0, renamed),
       or go away too.
-  - Do both in one pass: any renamed or removed config entry resets saved values, so users' configs
-    change only once.
+    - Away Pose Tweak position/rotation X/Y/Z, Rifle Away Speed and Left Hand Release Time (putting the
+      rifle away). Tuning for the end pose of rifle when ,from retained position, switching fully to pistol. 
+      Same as above: bake into `RifleAwayPose` and constants. The Preview Away Pose toggle only exists 
+      for this tuning and goes away with them.
 
 ## Low priority
 
