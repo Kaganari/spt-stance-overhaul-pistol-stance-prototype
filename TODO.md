@@ -1,8 +1,9 @@
 # Rifle Retention — TODO
 
-✅ done, 🔴 open. Fixes are done one at a time and tested in game before the next one. They are only
-grouped when they share a cause. Items marked *needs a log* need one swap captured with Debug Logging on
-before any code changes. Many items come from test runs of the checklists in `docs/testing/`.
+✅ done, 🔴 open, 🟡 waiting on something outside this mod. Fixes are done one at a time and tested in
+game before the next one. They are only grouped when they share a cause. Items marked *needs a log* need
+one swap captured with Debug Logging on before any code changes. Many items come from test runs of the
+checklists in `docs/testing/`.
 
 ## Code cleanup
 
@@ -33,18 +34,36 @@ before any code changes. Many items come from test runs of the checklists in `do
   - Normal weapon switching is unchanged: it still resets to the default stance. A cancelled retention
     doesn't restore the stance either.
 
-- 🔴 **Going fully to the pistol**
+- 🔴 **Going fully to the pistol: animate the rifle going away**
   - Now: while the rifle is retained, the quick-draw key switches fully to the pistol, but the rifle
-    copy disappears instantly, in one frame. The normal pistol key does nothing.
-  - Wanted:
-    - A transition: the rifle goes away (slung or to the back) and the left hand moves onto the pistol.
-    - Both keys do the same thing: go fully to the pistol.
-    - Each key maps to an intent that decides what it does, so they can be given different behaviors
-      later with a one-line change.
-  - Do both together: routing the pistol key before the transition exists would only spread the
-    instant disappearance.
-  - First check why the two keys behave differently (likely: quick-draw goes through the weapon-swap
-    input retention listens to, the pistol key for the item already in hands is filtered out earlier).
+    copy disappears instantly, in one frame, and the left hand teleports onto the pistol.
+  - Wanted: a transition. The rifle goes away (slung or to the back) and the left hand moves onto the
+    pistol smoothly.
+  - Doesn't depend on the lib change below: quick-draw already reaches retention today.
+
+- 🟡 **Normal pistol key should also go fully to the pistol** — *waiting on a RealismCommonLib change*
+  - Now: the normal pistol key does nothing while the rifle is retained; quick-draw goes fully to the
+    pistol. Both should do the same, through an intent per key, so they can be given different behaviors
+    later with a one-line change.
+  - Why (from the decompiled lib): RealismCommonLib raises `InputEvents.WeaponSwapInput` for
+    `SelectFirstPrimaryWeapon`, `SelectSecondPrimaryWeapon` and `QuickSelectSecondaryWeapon`, but not
+    for `SelectSecondaryWeapon` (the normal pistol key).
+    - Quick-draw reaches retention's `OnManualSwap`, which cancels retention: that is the instant drop.
+      The game itself does nothing, the pistol is already in hands.
+    - The normal pistol key never reaches retention, and the game ignores it for the same reason.
+  - **Lib changes needed first** (no mod changes for this until they are released):
+    - A new weapon-swap input event that says which key was pressed (the `ECommand`, or the target
+      slot). `WeaponSwapInput` has no parameter, so a consumer can't tell a pistol key from a primary
+      weapon key. A new event, not a changed signature, so other consumers of the old one keep working.
+    - That event also covers `SelectSecondaryWeapon`. Its absence from the current list looks like an
+      omission (with a rifle in hands it is a weapon swap), but may be deliberate, so it's not added to
+      the old event.
+    - Why in the lib: it reports input for every consumer. Working around it in the mod needs a second
+      patch on the same game method that must run before the lib's (Harmony priority) and a "pistol key
+      handled this frame" flag, which is fragile.
+  - Then in the mod: retention subscribes to the new event. Pistol keys go to the intent table, primary
+    keys cancel retention as now; the extra patch and the frame flag aren't needed.
+  - Do it after the animation above, so the pistol key doesn't spread the instant disappearance.
 
 - ✅ **Block two-handed weapon actions while retaining**
   - Blocked with an on-screen hint ("Can't … one-handed"):
