@@ -29,15 +29,14 @@ before any code changes. Many items come from test runs of the checklists in `do
   - Tested: lowering from the default stance and from other stances gives the same retained pose.
     `Capture` subtracts the current stance's spring contribution, so nothing needed fixing.
 
-- [ ] **Return to the previous stance when raising the rifle**
-  - Tested: the copy already rises back into the stance the rifle was in (it returns to the pose saved at
-    keypress), but the real rifle is then drawn into the default stance.
-  - Cause: while raising, `SnapStanceToRestForRetention` clears the stance and snaps the springs to rest
-    every frame (that is what fixed the return drift).
-  - Wanted: remember the stance at keypress and put the real rifle back in it.
-  - Must not change normal weapon switching: a regular swap doesn't remember the stance and always
-    starts in the default one. Only retention's own raise restores it.
-  - Careful: this is the same area as the drift fixes.
+- [x] **Return to the previous stance when raising the rifle**
+  - The copy already rose back into the old stance, but the real rifle was drawn into the default one:
+    while raising, the hidden rifle was snapped to rest every frame.
+  - Now the stance at keypress is remembered. While raising, the hidden rifle is held in that stance
+    (no enter animation), and at the reveal it becomes the stance input handler's chosen stance, so it
+    sticks.
+  - Normal weapon switching is unchanged: it still resets to the default stance. A cancelled retention
+    doesn't restore the stance either.
 
 - [ ] **Going fully to the pistol (dropping the retained rifle)**
   - Already allowed, but there is no animation: the rifle copy disappears from the hand and the left

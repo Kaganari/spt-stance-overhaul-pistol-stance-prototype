@@ -1,6 +1,7 @@
 using EFT;
 using EFT.InventoryLogic;
 using RealismCommonLib.Events;
+using StanceOverhaul.Stances;
 using StanceOverhaul.SubSystem.StanceInput;
 using System.Collections.Generic;
 using UnityEngine;
@@ -13,10 +14,10 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     ///
     /// On keypress a <see cref="RetainedRifleCopy"/> is spawned exactly where the held rifle is, the real
     /// rifle is hidden, its "put away" animation is skipped (<see cref="SwapAnimationSkipper"/>) so the
-    /// pistol draw starts immediately, and
-    /// the copy drops from the held pose to the retained pose (<see cref="RetainedRiflePose"/>). Returning reverses it: the
-    /// copy rises while the game draws the hidden real rifle (draw animation skipped too), and the copy is
-    /// swapped for the real rifle once it has settled onto it.
+    /// pistol draw starts immediately, and the copy drops from the held pose to the retained pose
+    /// (<see cref="RetainedRiflePose"/>). Returning reverses it: the copy rises while the game draws the
+    /// hidden real rifle (draw animation skipped too), and the copy is swapped for the real rifle once it
+    /// has settled onto it.
     /// </summary>
     internal class RifleRetentionSystem : ISubSystem
     {
@@ -46,6 +47,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private Weapon? _rifle;
         private Weapon? _pistol;
         private EquipmentSlot _rifleSlot;
+        // The rifle's stance at keypress (null = none): the rifle comes back in it.
+        private IStance? _stanceAtKeypress;
         private RetainedRifleCopy? _copy;
         private ECharacterWeaponBones _anchorBone = ECharacterWeaponBones.weapon;
         private readonly HeldWeaponHider _hider = new HeldWeaponHider();
@@ -216,11 +219,12 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             // The copy stands in for the real rifle until it has settled onto it.
             _hider.Hide(handsController!.ControllerGameObject);
 
-            // Keep the hidden rifle at rest: no previous-weapon stance (PistolCompress) easing out on it,
-            // no spring tails. Logs showed ~4cm / 9deg of drift over ~0.45s without this.
+            // Hold the hidden rifle still in the stance it was lowered from: no previous-weapon stance
+            // (PistolCompress) easing out on it, no enter animation, no spring tails. Logs showed
+            // ~4cm / 9deg of drift over ~0.45s without this.
             var stances = Plugin.StanceControllerInstance;
             if (stances != null && stances.AwakeRan)
-                stances.SnapStanceToRestForRetention();
+                stances.SnapStanceForRetention(_stanceAtKeypress);
 
             // Right after the fast-forward the animator is not posed yet and the weapon bone reports a
             // junk pose for a frame: only trust the real rifle after it has been drawn and idle for a bit.
@@ -247,7 +251,11 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
             // EndRetention reveals the real rifle in the same frame the copy goes away.
             if (settled || _settleTimer > SETTLE_MAX_TIME)
+            {
+                // The rifle is already in that stance (held there while raising); make it stick.
+                Plugin.StanceControllerInstance?.AdoptStanceAfterRetention(_stanceAtKeypress);
                 EndRetention(settled ? "REVEAL settled" : "REVEAL settle timeout");
+            }
         }
 
         private void UpdatePose(Player player, float deltaTime)
@@ -359,6 +367,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _rifle = rifle;
             _pistol = pistol;
             _rifleSlot = rifleSlot;
+            _stanceAtKeypress = Plugin.StanceControllerInstance?.CurrentStance;
+            RifleRetentionDebug.Log($"stance at keypress: {_stanceAtKeypress?.StanceType.ToString() ?? "none"}");
             RetentionSpace.TryGetLocalPose(heldBone, out _heldPosition, out _heldRotation);
 
             _copy = RetainedRifleCopy.Spawn(player, rifle, space, heldBone, _heldPosition, _heldRotation);
@@ -456,6 +466,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
             _rifle = null;
             _pistol = null;
+            _stanceAtKeypress = null;
             _blend = 0f;
             _swapTimer = 0f;
             SetState(ERetentionState.Idle, reason);

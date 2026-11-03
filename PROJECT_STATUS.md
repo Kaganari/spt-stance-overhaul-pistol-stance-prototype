@@ -103,11 +103,14 @@ While the rifle is retained:
 | `RetentionReloadPatch` | prefix `FirearmController.CanStartReload` | Covers reloads that don't come from a keybind, such as inventory drag-and-drop. |
 | `RetentionFovApplyPatch` / `RetentionFovResetPatch` | postfix `FirstPersonStrategy.Apply/ResetFovAdjustments` | Mirrors EFT's first-person FOV squash onto the copy, so the hand isn't drawn short of the handguard. |
 
-### Shared files touched (~120 lines total)
+### Shared files touched (~170 lines total)
 
 - **`StanceController`:** registers the subsystem and exposes `IsRetainingRifle`.
-  - `SnapStanceToRestForRetention()` clears the stance state and springs while the hidden rifle rises.
-- **`StanceState`:** `ClearImmediate()`.
+  - `SnapStanceForRetention(stance)` holds the hidden rifle in the stance it was lowered from (or at rest)
+    while it rises, with the springs snapped. `AdoptStanceAfterRetention` hands that stance to the input
+    handler at the reveal.
+- **`StanceInputHandler`:** `AdoptStance()`, the only retention entry point into stance intent.
+- **`StanceState`:** `ClearImmediate()`, `EnterAtPoseImmediate()`, `IsHoldingAtPose()`.
 - **`PluginConfig`:** section 14, which has these entries:
   - Enable, Keybind
   - Patrol Pose Tweak position/rotation X/Y/Z
@@ -153,7 +156,7 @@ While the rifle is retained:
 - On the first frame after `FastForward`, the weapon bone reports a junk pose. That is why the reveal is
   gated on drawn + idle.
 - The pistol's default stance (PistolCompress) exits with an animation that carries onto the rifle and
-  causes drift. That is what `SnapStanceToRestForRetention` exists for.
+  causes drift. That is what `SnapStanceForRetention` exists for.
 - The "hand holding air short of the handguard" bug was not an IK error. It was EFT's FOV compensation
   squashing the arms but not the copy.
 - **Weapon keys:**

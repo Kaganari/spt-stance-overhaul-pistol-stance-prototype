@@ -369,5 +369,31 @@ namespace StanceOverhaul.State
             StancePosition = Vector3.zero;
             StanceRotation = Vector3.zero;
         }
+
+        /// <summary>True when <paramref name="stance"/> is the only slot and is holding at its pose.</summary>
+        public bool IsHoldingAtPose(IStance stance)
+        {
+            return _incoming == null && PrimarySlot != null && PrimarySlot.Stance == stance
+                && PrimarySlot.IsAtPose && PrimarySlot.Direction == 0;
+        }
+
+        /// <summary>
+        /// Like <see cref="ClearImmediate"/>, but ends up holding <paramref name="stance"/> at its pose this
+        /// frame, with no enter animation. Used by rifle retention to bring the rifle back in the stance it
+        /// was lowered from.
+        /// </summary>
+        public void EnterAtPoseImmediate(IStance stance)
+        {
+            ClearImmediate();
+
+            var transition = new StanceTransitionContext(EStanceType.None, stance.StanceType);
+            PrimarySlot = new StanceSlot(stance, ECurveType.Enter, 1f, 0, transition);
+            stance.OnEnter();
+
+            _smoothedPosition = PrimarySlot.EvaluatePosition();
+            _smoothedRotation = PrimarySlot.EvaluateRotation();
+            StancePosition = _smoothedPosition;
+            StanceRotation = _smoothedRotation;
+        }
     }
 }

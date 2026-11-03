@@ -391,6 +391,18 @@ namespace StanceOverhaul.SubSystem.StanceInput
             Reconcile();
         }
 
+        // Rifle retention brought the rifle back in the stance it was lowered from (already set in StanceState,
+        // with no animation): take it on as the chosen stance, so the next Reconcile keeps it. Normal weapon
+        // swaps never come here, they still reset to the default stance.
+        public void AdoptStance(IStance? stance)
+        {
+            if (stance != null && !IsAllowedOnCurrentWeapon(stance))
+                stance = null;
+
+            SetChosen(stance);
+            Reconcile();
+        }
+
         // The new weapon is ready: make sure the stance state matches it (pistol compressed up, or a stance from
         // the previous weapon gone).
         private void OnWeaponInit()

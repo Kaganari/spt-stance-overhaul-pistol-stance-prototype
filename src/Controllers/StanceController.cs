@@ -230,13 +230,17 @@ namespace StanceOverhaul.Controllers
         public bool IsRetainingRifle => _rifleRetentionSystem != null && _rifleRetentionSystem.IsActive;
 
         /// <summary>
-        /// Rifle retention: put the weapon at rest right now. Clears the stance state with no exit
-        /// animation and snaps the stance/offset springs onto their rest values, so nothing eases the
-        /// weapon around after it appears.
+        /// Rifle retention: put the weapon in <paramref name="stance"/> right now (null = no stance, at
+        /// rest). Sets the stance state with no enter/exit animation and snaps the stance/offset springs
+        /// onto their resting values, so nothing eases the weapon around after it appears. A rifle stance
+        /// is only applied once the rifle counts as a rifle again; until then the weapon is held at rest.
         /// </summary>
-        public void SnapStanceToRestForRetention()
+        public void SnapStanceForRetention(IStance? stance)
         {
-            _stanceState.ClearImmediate();
+            if (stance == null || WeaponStateInstance.TreatAsPistol)
+                _stanceState.ClearImmediate();
+            else if (!_stanceState.IsHoldingAtPose(stance))
+                _stanceState.EnterAtPoseImmediate(stance);
 
             StancePositionSpring.Zero = StancePosition + BaseWeaponOffsetPosition;
             StanceRotationSpring.Zero = StanceRotation;
@@ -253,6 +257,15 @@ namespace StanceOverhaul.Controllers
                 spring.ForceAccumulator = Vector3.zero;
                 spring.ForceAccumulatorLimitless = Vector3.zero;
             }
+        }
+
+        /// <summary>
+        /// Rifle retention, once the real rifle is back: make <paramref name="stance"/> the player's chosen
+        /// stance, so the stance input handler keeps it instead of resetting to the default.
+        /// </summary>
+        public void AdoptStanceAfterRetention(IStance? stance)
+        {
+            _inputHandler.AdoptStance(stance);
         }
 
         public Spring StancePositionSpring { get; private set; }
