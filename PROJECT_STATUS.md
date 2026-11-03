@@ -41,16 +41,17 @@ Related files:
 dotnet build spt-stance-overhaul.csproj -c Release
 ```
 
-- A local, untracked `Directory.Build.props` sets `SptPath`, `RealismCommonLibDll`, `SkipDeploy=true` and
-  imports `spt-paths.targets`. That retargets the csproj's hard-coded `F:\SP EFT\SPT-41X` reference paths
-  to this machine, for both builds and the IDE (VS Code), and keeps a plain build from deploying.
+- Two local, untracked files set this machine up: `Directory.Build.props` sets `SptPath`,
+  `RealismCommonLibDll` and `SkipDeploy=true`; `Directory.Build.targets` uses them to retarget the
+  csproj's hard-coded `F:\SP EFT\SPT-41X` reference paths. MSBuild picks both up automatically, for builds
+  and the IDE (VS Code), and a plain build never deploys.
 - Then copy `bin/Release/netstandard2.1/spt-stance-overhaul.dll` and `curves.json` to
   `release/BepInEx/plugins/Realism/`.
 - Never build with `SkipDeploy=false`: the build would copy itself into the SPT install.
 - The game log is at `G:\Games\EscapeFromTarkov_4.1.16\BepInEx\LogOutput.log`. With Debug Logging on,
   retention lines go to the `StanceOverhaul.Retention` source.
-- `Directory.Build.props`, `spt-paths.targets` and `mod-compile-command.txt` are local helpers. They stay
-  untracked.
+- Both `Directory.Build.*` files are excluded via `.git/info/exclude`. A fresh clone or worktree needs
+  them recreated.
 
 ---
 
