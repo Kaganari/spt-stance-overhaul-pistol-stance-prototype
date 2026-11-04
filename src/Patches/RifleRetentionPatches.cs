@@ -1,4 +1,5 @@
 using EFT;
+using EFT.Animations;
 using EFT.InputSystem;
 using EFT.InventoryLogic;
 using HarmonyLib;
@@ -14,7 +15,8 @@ namespace StanceOverhaul.Patches
     /// <summary>
     /// The swap animations free the left hand via the LEFT_HAND_WEIGHT curve, which zeroes the left limb
     /// IK weight and makes IkProcess skip it entirely. While the retained rifle copy is shown, keep the left
-    /// arm fully on IK so it stays on the handguard.
+    /// arm fully on IK so it stays on the handguard. Also where the copy is placed each frame: after the
+    /// game's procedural motion, before the left arm is solved onto it.
     /// </summary>
     public class RetentionLeftHandIKPatch : ModulePatch
     {
@@ -26,7 +28,12 @@ namespace StanceOverhaul.Patches
         [PatchPrefix]
         private static void Prefix(Player __instance)
         {
-            if (!__instance.IsYourPlayer || !RifleRetentionSystem.ForceLeftHandIK)
+            if (!__instance.IsYourPlayer)
+                return;
+
+            RifleRetentionSystem.OnBeforeLeftArmIK(__instance);
+
+            if (!RifleRetentionSystem.ForceLeftHandIK)
                 return;
 
             LimbIK? leftArm = LeftArmIK.Get(__instance);
@@ -37,6 +44,24 @@ namespace StanceOverhaul.Patches
             leftArm.solver.IKRotationWeight = 1f;
             if (__instance.HandPosers != null && __instance.HandPosers.Length > 0 && __instance.HandPosers[0] != null)
                 __instance.HandPosers[0].weight = 1f;
+        }
+    }
+
+    /// <summary>
+    /// Steps the retained rifle's own springs (<see cref="RetainedRifleMotion"/>) in the same fixed steps as
+    /// the game's: their math is per step, not per second. Runs before IkProcess in the same frame.
+    /// </summary>
+    public class RetentionProcessEffectorsPatch : ModulePatch
+    {
+        protected override MethodBase GetTargetMethod()
+        {
+            return AccessTools.Method(typeof(ProceduralWeaponAnimation), nameof(ProceduralWeaponAnimation.ProcessEffectors));
+        }
+
+        [PatchPostfix]
+        private static void Postfix(ProceduralWeaponAnimation __instance, float deltaTime, int nFixedFrames)
+        {
+            RifleRetentionSystem.OnProceduralStep(__instance, deltaTime, nFixedFrames);
         }
     }
 

@@ -29,6 +29,15 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             return bone == ECharacterWeaponBones.weapon && hands.Weapon != null ? hands.Weapon : hands.WeaponRoot;
         }
 
+        /// <summary>
+        /// The camera's position in this space. Aiming slides the camera inside it (up to ~6 cm, with an
+        /// overshoot, in logs), which on screen looks like everything in this space lunging forward.
+        /// </summary>
+        public static bool TryGetCameraPosition(out Vector3 position)
+        {
+            return TryGetLocalPose(PlayerStateInstance.PWA?.HandsContainer?.CameraTransform, out position, out _);
+        }
+
         public static bool TryGetLocalPose(Transform? target, out Vector3 localPosition, out Quaternion localRotation)
         {
             Transform? root = Root;

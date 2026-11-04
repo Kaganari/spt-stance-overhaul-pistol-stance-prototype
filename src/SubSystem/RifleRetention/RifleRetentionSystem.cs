@@ -1,4 +1,5 @@
 using EFT;
+using EFT.Animations;
 using EFT.InventoryLogic;
 using RealismCommonLib.Events;
 using StanceOverhaul.Stances;
@@ -77,6 +78,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         // Held rifle pose in retention space, captured on keypress.
         private Vector3 _heldPosition;
         private Quaternion _heldRotation;
+        private Vector3 _cameraAtKeypress;
 
         private bool _realRifleReady;
         private int _realPosedFrames;
@@ -159,8 +161,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                     break;
             }
             if (!stillActive) return;
-
-            UpdatePose(player, deltaTime);
 
             // Every frame while moving; every 15th while retained.
             if (RifleRetentionDebug.Enabled && (_state != ERetentionState.Retained || Time.frameCount % 15 == 0))
@@ -306,6 +306,12 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
             float eased = Mathf.SmoothStep(0f, 1f, _blend);
 
+            if (!_loweredPose.TryEvaluateHeld(out Vector3 upPos, out Quaternion upRot))
+            {
+                upPos = _heldPosition;
+                upRot = _heldRotation;
+            }
+
             // Re-evaluated every frame: picks up tweak slider changes.
             // TEMP (tuning): the preview toggle holds the rifle at the away pose instead.
             bool preview = PluginConfig.RifleRetentionPreviewAwayPose.Value;
@@ -319,15 +325,14 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
             // "Up" end of the travel: where the rifle was held or, when raising and the real rifle is
             // already in hands, exactly where it actually is (it comes back in idle, not the old stance).
-            Vector3 upPos = _heldPosition;
-            Quaternion upRot = _heldRotation;
             if (_state == ERetentionState.Raising && _realRifleReady && TrySampleRealRiflePose(out Vector3 realPos, out Quaternion realRot))
             {
                 upPos = realPos;
                 upRot = realRot;
             }
 
-            Vector3 pos = Vector3.Lerp(upPos, loweredPos, eased);
+            // Fades out on the way up, so the rifle still ends exactly on the real one.
+            Vector3 pos = Vector3.Lerp(upPos, loweredPos, eased) + CameraDriftCorrection(player) * eased;
             Quaternion rot = Quaternion.Slerp(upRot, loweredRot, eased);
 
             if (_state == ERetentionState.Raising)
@@ -346,9 +351,20 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _copy.HoldWithLeftHand(player);
         }
 
+        /// <summary>
+        /// How far to move the copy so it keeps its place on screen while aiming slides the camera. Position
+        /// only: the camera's rotation carries freelook.
+        /// </summary>
+        private Vector3 CameraDriftCorrection(Player player)
+        {
+            return RetentionSpace.TryGetCameraPosition(out Vector3 camera)
+                ? _copy!.ThroughFovSquash(player, camera - _cameraAtKeypress)
+                : Vector3.zero;
+        }
+
         private void UpdateDismissPose(Player player)
         {
-            // Captured here, not on the key press: input runs mid-frame, the pose is only final after Update.
+            // Captured here, not on the key press: input runs mid-frame, the pose is set later in the frame.
             if (!_dismissFromCaptured)
             {
                 _dismissFromPosition = _copy!.Anchor.localPosition;
@@ -474,6 +490,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _stanceAtKeypress = Plugin.StanceControllerInstance?.CurrentStance;
             RifleRetentionDebug.Log($"stance at keypress: {_stanceAtKeypress?.StanceType.ToString() ?? "none"}");
             RetentionSpace.TryGetLocalPose(heldBone, out _heldPosition, out _heldRotation);
+            RetentionSpace.TryGetCameraPosition(out _cameraAtKeypress);
 
             _copy = RetainedRifleCopy.Spawn(player, rifle, space, heldBone, _heldPosition, _heldRotation);
             if (_copy == null)
@@ -582,6 +599,28 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         }
 
         // ---- Entry points for RifleRetentionPatches ----
+
+        /// <summary>ProcessEffectors postfix: the game moved its springs, the rifle's own move in step.</summary>
+        internal static void OnProceduralStep(ProceduralWeaponAnimation pwa, float deltaTime, int nFixedFrames)
+        {
+            // Runs for every player: the active check comes first, and rules out almost all of them.
+            if (_instance != null && _instance.IsActive && ReferenceEquals(pwa, PlayerStateInstance.PWA))
+                _instance._loweredPose.StepMotion(pwa, deltaTime, nFixedFrames);
+        }
+
+        /// <summary>
+        /// IkProcess prefix: places the copy here rather than in Update. The game applies this frame's
+        /// procedural motion in LateUpdate, just before this; in Update the copy would run a frame behind
+        /// the right hand. It is also the last moment the left hand can still follow the copy this frame.
+        /// </summary>
+        internal static void OnBeforeLeftArmIK(Player player)
+        {
+            RifleRetentionSystem? system = _instance;
+            if (system == null || system._state == ERetentionState.Idle || system._copy == null || !system._copy.IsAlive)
+                return;
+
+            system.UpdatePose(player, Time.deltaTime);
+        }
 
         /// <summary>
         /// IkProcess prefix: keep the left arm on the copy even when the swap animation frees the hand, until

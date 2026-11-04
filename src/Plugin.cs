@@ -45,6 +45,7 @@ namespace StanceOverhaul
             new HandIKPatch().Enable();
             new ElbowIKPatch().Enable();
             new RetentionLeftHandIKPatch().Enable();
+            new RetentionProcessEffectorsPatch().Enable();
             new RetentionSkipRifleRemovePatch().Enable();
             new RetentionSkipRifleSpawnPatch().Enable();
             new RetentionWeaponAppearedPatch().Enable();

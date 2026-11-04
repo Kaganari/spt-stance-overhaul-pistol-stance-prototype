@@ -313,6 +313,20 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             }
         }
 
+        /// <summary>
+        /// The move in retention space that comes out as <paramref name="offset"/> on screen: the squash
+        /// applied later this frame shrinks whatever lies along its axis.
+        /// </summary>
+        public Vector3 ThroughFovSquash(Player player, Vector3 offset)
+        {
+            Transform? space = RetentionSpace.Root;
+            float squash = player.RibcageScaleCurrent;
+            if (space == null || squash <= 0f) return offset;
+
+            Vector3 axis = Quaternion.Inverse(space.rotation) * player.HandsRotation * Vector3.forward;
+            return offset + axis * (Vector3.Dot(offset, axis) * (1f / squash - 1f));
+        }
+
         public void UndoFovSquash()
         {
             if (!_fovSquashed) return;

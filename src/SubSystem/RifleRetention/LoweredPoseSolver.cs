@@ -1,3 +1,4 @@
+using EFT.Animations;
 using UnityEngine;
 using static RealismCommonLib.Plugin;
 
@@ -10,14 +11,20 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// RotationCenter. The target offset is passed in on every evaluation, so it can change live (tweak
     /// sliders) after the rifle left the hands. It knows nothing about which pose is asked for; see
     /// <see cref="RetainedRiflePose"/>.
+    ///
+    /// Every evaluation also adds the rifle's own procedural motion (<see cref="RetainedRifleMotion"/>), so
+    /// it moves by itself rather than hanging still.
     /// </summary>
     internal class LoweredPoseSolver
     {
-        private bool _isValid;
+        // Set while a capture is valid.
+        private RetainedRifleMotion? _motion;
 
         private Vector3 _curPosTotal;
         private Vector3 _nonStancePos;
         private Vector3 _nonStanceRot;
+        private Vector3 _heldStancePos;
+        private Vector3 _heldStanceRot;
         private Vector3 _rotCenter;
         private Quaternion _baseRot;
         private Vector3 _prePivotPos;
@@ -30,24 +37,28 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         public bool Capture(Transform space, Transform heldBone)
         {
-            var hands = PlayerStateInstance.PWA.HandsContainer;
+            ProceduralWeaponAnimation pwa = PlayerStateInstance.PWA;
+            var hands = pwa.HandsContainer;
             var stances = Plugin.StanceControllerInstance;
             Transform wra = hands.WeaponRootAnim;
             Transform? parent = wra != null ? wra.parent : null;
             if (wra == null || parent == null || stances == null)
             {
-                _isValid = false;
+                _motion = null;
                 return false;
             }
 
             // Totals currently applied to the weapon (SpringGetPatch already includes the stance springs).
-            Vector3 curPosTotal = hands.HandsPosition.Get();
-            Vector3 curRotTotal = hands.HandsRotation.Get();
-            Vector3 curStancePos = stances.StancePositionSpring.Get() - stances.BaseWeaponOffsetPosition;
+            _curPosTotal = hands.HandsPosition.Get();
+            Vector3 curRotTotal = hands.HandsRotation.Get() + RetainedRifleMotion.GameSwayRotation(pwa);
+            _heldStancePos = stances.StancePositionSpring.Get() - stances.BaseWeaponOffsetPosition;
+            _heldStanceRot = stances.StanceRotationSpring.Get();
 
-            _curPosTotal = curPosTotal;
-            _nonStancePos = curPosTotal - curStancePos;
-            _nonStanceRot = curRotTotal - stances.StanceRotationSpring.Get();
+            // Without the motion of this moment: it is added back live, or a key press during a mouse
+            // turn would stay baked into the pose.
+            _motion = new RetainedRifleMotion(pwa);
+            _nonStancePos = _curPosTotal - _heldStancePos - _motion.Position;
+            _nonStanceRot = curRotTotal - _heldStanceRot - _motion.Rotation;
 
             // Undo the pivot rotation of the held pose (parent space).
             _rotCenter = hands.RotationCenter;
@@ -60,13 +71,17 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _parentPos = space.InverseTransformPoint(parent.position);
             _parentRot = Quaternion.Inverse(space.rotation) * parent.rotation;
 
-            _isValid = true;
             return true;
         }
 
         public void Reset()
         {
-            _isValid = false;
+            _motion = null;
+        }
+
+        public void StepMotion(ProceduralWeaponAnimation pwa, float deltaTime, int nFixedFrames)
+        {
+            _motion?.Step(pwa, deltaTime, nFixedFrames);
         }
 
         /// <param name="targetPosition">Stance position offset, in the same units and axes as the stance curves.</param>
@@ -75,11 +90,11 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         {
             position = Vector3.zero;
             rotation = Quaternion.identity;
-            if (!_isValid)
+            if (_motion == null)
                 return false;
 
-            Vector3 tgtPosTotal = _nonStancePos + targetPosition;
-            Vector3 tgtRotTotal = _nonStanceRot + targetRotation;
+            Vector3 tgtPosTotal = _nonStancePos + targetPosition + _motion.Position;
+            Vector3 tgtRotTotal = _nonStanceRot + targetRotation + _motion.Rotation;
 
             Quaternion tgtRot = SpringEuler(tgtRotTotal) * _baseRot;
             Vector3 tgtPos = _prePivotPos + (tgtPosTotal - _curPosTotal)
@@ -91,6 +106,12 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             position = wraPos + wraRot * _boneRelPos;
             rotation = wraRot * _boneRelRot;
             return true;
+        }
+
+        /// <summary>The pose the rifle was held in at keypress, moved by the rifle's own motion.</summary>
+        public bool TryEvaluateHeld(out Vector3 position, out Quaternion rotation)
+        {
+            return TryEvaluate(_heldStancePos, _heldStanceRot, out position, out rotation);
         }
 
         // Same composition as ProceduralWeaponAnimation.DeferredRotateWithCustomOrder.
