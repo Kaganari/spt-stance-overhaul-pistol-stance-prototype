@@ -268,6 +268,25 @@ namespace StanceOverhaul.Controllers
             _inputHandler.AdoptStance(stance);
         }
 
+        /// <summary>
+        /// Rifle retention: holds the weapon in hands at a stance offset, in the terms of
+        /// <see cref="LoweredPoseSolver"/>. A spring rests at 2 * Zero, and that offset is relative to one
+        /// base offset.
+        /// </summary>
+        public void HoldAtStanceOffset(Vector3 position, Vector3 rotation)
+        {
+            StancePositionSpring.Zero = (BaseWeaponOffsetPosition + position) / 2f;
+            StanceRotationSpring.Zero = rotation / 2f;
+
+            foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring })
+            {
+                spring.Current = spring.Zero;
+                spring.Velocity = Vector3.zero;
+                spring.ForceAccumulator = Vector3.zero;
+                spring.ForceAccumulatorLimitless = Vector3.zero;
+            }
+        }
+
         public Spring StancePositionSpring { get; private set; }
         public Spring StanceRotationSpring { get; private set; }
         public Spring OffsetPositionSpring { get; private set; }

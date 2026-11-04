@@ -35,6 +35,10 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private Vector3 _parentPos;
         private Quaternion _parentRot;
 
+        /// <summary>The stance offset the rifle was held in at keypress: the "up" end of its travel.</summary>
+        public Vector3 HeldPosition => _heldStancePos;
+        public Vector3 HeldRotation => _heldStanceRot;
+
         public bool Capture(Transform space, Transform heldBone)
         {
             ProceduralWeaponAnimation pwa = PlayerStateInstance.PWA;
@@ -106,12 +110,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             position = wraPos + wraRot * _boneRelPos;
             rotation = wraRot * _boneRelRot;
             return true;
-        }
-
-        /// <summary>The pose the rifle was held in at keypress, moved by the rifle's own motion.</summary>
-        public bool TryEvaluateHeld(out Vector3 position, out Quaternion rotation)
-        {
-            return TryEvaluate(_heldStancePos, _heldStanceRot, out position, out rotation);
         }
 
         // Same composition as ProceduralWeaponAnimation.DeferredRotateWithCustomOrder.

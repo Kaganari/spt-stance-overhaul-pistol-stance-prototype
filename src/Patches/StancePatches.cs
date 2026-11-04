@@ -7,6 +7,7 @@ using HarmonyLib;
 using SPT.Reflection.Patching;
 using StanceOverhaul.Events;
 using StanceOverhaul.Enums;
+using StanceOverhaul.SubSystem.RifleRetention;
 using System;
 using System.Reflection;
 using System.Collections.Generic;
@@ -557,6 +558,7 @@ namespace StanceOverhaul.Patches
                 StanceControllerInstance.StanceRotationSpring.Zero = StanceControllerInstance.StanceRotation;
                 StanceControllerInstance.OffsetPositionSpring.Zero = StanceControllerInstance.DetailsOffsetPosition;
                 StanceControllerInstance.OffsetRotationSpring.Zero = StanceControllerInstance.DetailsOffsetRotation;
+                RifleRetentionSystem.OnStanceSpringsSet();
             }
         }
     }

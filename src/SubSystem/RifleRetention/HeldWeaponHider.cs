@@ -12,6 +12,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     internal class HeldWeaponHider
     {
         private readonly List<Renderer> _hidden = new List<Renderer>();
+        private readonly List<LaserBeam> _hiddenLasers = new List<LaserBeam>();
 
         public int Count => _hidden.Count;
 
@@ -26,6 +27,14 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 renderer.enabled = false;
                 _hidden.Add(renderer);
             }
+
+            // Lasers draw themselves (Graphics.DrawMesh), with no renderer to turn off.
+            foreach (LaserBeam laser in controllerObject.GetComponentsInChildren<LaserBeam>(true))
+            {
+                if (!laser.enabled) continue;
+                laser.enabled = false;
+                _hiddenLasers.Add(laser);
+            }
         }
 
         public void RestoreAll()
@@ -36,6 +45,13 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                     renderer.enabled = true;
             }
             _hidden.Clear();
+
+            foreach (LaserBeam laser in _hiddenLasers)
+            {
+                if (laser != null)
+                    laser.enabled = true;
+            }
+            _hiddenLasers.Clear();
         }
     }
 }
