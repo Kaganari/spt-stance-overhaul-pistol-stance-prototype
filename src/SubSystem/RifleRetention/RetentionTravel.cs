@@ -11,12 +11,17 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// </summary>
     internal static class RetentionTravel
     {
-        public static Vector3 Lowering(string curveName, float blend)
+        public static Vector3 Position(bool raising, float blend)
         {
-            return Evaluate(curveName, blend);
+            return raising ? Raising("retention_raise_position", blend) : Evaluate("retention_lower_position", blend);
         }
 
-        public static Vector3 Raising(string curveName, float blend)
+        public static Vector3 Rotation(bool raising, float blend)
+        {
+            return raising ? Raising("retention_raise_rotation", blend) : Evaluate("retention_lower_rotation", blend);
+        }
+
+        private static Vector3 Raising(string curveName, float blend)
         {
             return Vector3.one - Evaluate(curveName, 1f - blend);
         }

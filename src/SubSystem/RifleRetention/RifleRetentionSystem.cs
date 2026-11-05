@@ -69,12 +69,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private bool _ignoreSwapInput;
         private bool _pistolAppeared;
-        private float _swapTimer;
+        private float _moveTimer; // since the key press that started this move
         private float _blend; // 0 = held pose, 1 = lowered pose
 
-        // Held rifle pose in retention space, captured on keypress.
-        private Vector3 _heldPosition;
-        private Quaternion _heldRotation;
         private Vector3 _cameraAtKeypress;
 
         private bool _realRifleReady;
@@ -172,10 +169,10 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private bool UpdateLowering(Player.AbstractHandsController? handsController, bool rifleInHands, bool pistolInHands,
             bool somethingElseInHands, Item? inHands, float deltaTime)
         {
-            _swapTimer += deltaTime;
-            if (_swapTimer > SWAP_TIMEOUT || somethingElseInHands)
+            _moveTimer += deltaTime;
+            if (_moveTimer > SWAP_TIMEOUT || somethingElseInHands)
             {
-                EndRetention(_swapTimer > SWAP_TIMEOUT ? "lowering timeout" : "lowering: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                EndRetention(_moveTimer > SWAP_TIMEOUT ? "lowering timeout" : "lowering: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
                 return false;
             }
 
@@ -234,10 +231,10 @@ namespace StanceOverhaul.SubSystem.RifleRetention
         private bool UpdateRaising(Player.AbstractHandsController? handsController, bool rifleInHands,
             bool somethingElseInHands, Item? inHands, float deltaTime)
         {
-            _swapTimer += deltaTime;
-            if (_swapTimer > SWAP_TIMEOUT || somethingElseInHands)
+            _moveTimer += deltaTime;
+            if (_moveTimer > SWAP_TIMEOUT || somethingElseInHands)
             {
-                EndRetention(_swapTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
+                EndRetention(_moveTimer > SWAP_TIMEOUT ? "raising timeout" : "raising: something else in hands (" + RifleRetentionDebug.Name(inHands) + ")");
                 return false;
             }
 
@@ -248,6 +245,9 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             // The copy stands in for the real rifle until it can take over.
             _hider.Hide(handsController!.ControllerGameObject);
             _rifleBackInHands = true;
+            // No previous-weapon stance (PistolCompress) easing out on it, no enter animation. Logs showed
+            // ~4cm / 9deg of drift over ~0.45s without this and OnStanceSpringsSet.
+            SetRifleStance();
 
             // Right after the fast-forward the animator is not posed yet and the weapon bone reports a
             // junk pose for a frame: only trust the real rifle after it has been drawn and idle for a bit.
@@ -257,27 +257,22 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _realRifleReady = _realPosedFrames >= REAL_POSE_MIN_FRAMES;
             if (_realRifleReady && !wasReady)
                 RifleRetentionDebug.Log($"real rifle trusted after {_realPosedFrames} posed frames");
-            if (_realRifleReady)
-            {
-                // Its animator is still kicking in here: a ~5mm step, then the barrel roll, in logs.
-                // Hidden for now, so the swap doesn't show them.
-                _realReadyTime += deltaTime;
-                if (_realReadyTime >= PluginConfig.RifleRetentionRaiseSwapDelay.Value)
-                {
-                    SwapToRealRifle();
-                    return false;
-                }
-            }
+            if (!_realRifleReady) return true;
 
-            // Not on the swap frame: this puts the springs at rest for the frame, and from the swap on
-            // nothing pins them back onto the rifle's travel, so it would jump (~2cm / 5deg in logs).
-            // Hold the hidden rifle still in the stance it was lowered from: no previous-weapon stance
-            // (PistolCompress) easing out on it, no enter animation, no spring tails. Logs showed
-            // ~4cm / 9deg of drift over ~0.45s without this.
+            // Its animator is still kicking in here: a ~5mm step, then the barrel roll, in logs. Hidden
+            // for now, so the swap doesn't show them.
+            _realReadyTime += deltaTime;
+            if (_realReadyTime < PluginConfig.RifleRetentionRaiseSwapDelay.Value) return true;
+
+            SwapToRealRifle();
+            return false;
+        }
+
+        private void SetRifleStance()
+        {
             var stances = Plugin.StanceControllerInstance;
             if (stances != null && stances.AwakeRan)
-                stances.SnapStanceForRetention(_stanceAtKeypress);
-            return true;
+                stances.SetStanceForRetention(_stanceAtKeypress);
         }
 
         /// <summary>
@@ -289,44 +284,42 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             if (RifleRetentionDebug.Enabled && TrySampleRealRiflePose(out Vector3 realPos, out Quaternion realRot))
                 RifleRetentionDebug.Log($"swap gap: {Vector3.Distance(_copy!.Anchor.localPosition, realPos) * 1000f:F1}mm/{Quaternion.Angle(_copy.Anchor.localRotation, realRot):F2}deg");
 
+            RemoveCopy();
+            SetState(ERetentionState.Rising, "real rifle ready");
+        }
+
+        private void RemoveCopy()
+        {
             _hider.RestoreAll();
             _copy?.Destroy(PlayerStateInstance.Player);
             _copy = null;
-            SetState(ERetentionState.Rising, "real rifle ready");
         }
 
         private void UpdateRising(Player player, float deltaTime)
         {
-            _swapTimer += deltaTime;
+            _moveTimer += deltaTime;
             if (!ReferenceEquals(player.HandsController?.Item, _rifle))
             {
                 EndRetention("rising: rifle left hands");
                 return;
             }
 
-            // In the stance it was lowered from: no easing out of the previous weapon's stance on it, no
-            // enter animation. Its springs are free from here on, so it lags and settles like any weapon.
-            var stances = Plugin.StanceControllerInstance;
-            if (stances != null && stances.AwakeRan)
-                stances.SetStanceForRetention(_stanceAtKeypress);
-
+            SetRifleStance();
             Rise(0f, deltaTime);
             if (RifleRetentionDebug.Enabled)
                 RifleRetentionDebug.TraceFrame("frame", _state.ToString(), _blend, true, null, _anchorBone);
             if (_blend > 0f) return;
 
-            stances?.AdoptStanceAfterRetention(_stanceAtKeypress);
-            EndRetention("REVEAL");
+            Plugin.StanceControllerInstance?.AdoptStanceAfterRetention(_stanceAtKeypress);
+            EndRetention("raised");
         }
 
         // One speed for the whole rise, copy and real rifle alike, so the swap doesn't show as a change of pace.
         private void Rise(float limit, float deltaTime)
         {
-            if (_swapTimer < PluginConfig.RifleRetentionRaiseStartDelay.Value) return;
+            if (_moveTimer < PluginConfig.RifleRetentionRaiseStartDelay.Value) return;
             _blend = Mathf.MoveTowards(_blend, limit, deltaTime * PluginConfig.RifleRetentionRaiseSpeed.Value);
         }
-
-        private float EasedBlend => Mathf.SmoothStep(0f, 1f, _blend);
 
         /// <summary>
         /// Where the rifle is along its travel, as a stance offset. Copy and real rifle both follow this,
@@ -340,17 +333,10 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             Vector3 targetRot = preview ? RifleAwayPose.Rotation : RetainedRiflePose.Rotation;
 
             bool raising = _state == ERetentionState.Raising || _state == ERetentionState.Rising;
-            Vector3 positionTravel = raising
-                ? RetentionTravel.Raising("retention_raise_position", _blend)
-                : RetentionTravel.Lowering("retention_lower_position", _blend);
-            Vector3 rotationTravel = raising
-                ? RetentionTravel.Raising("retention_raise_rotation", _blend)
-                : RetentionTravel.Lowering("retention_lower_rotation", _blend);
-
             Vector3 heldPos = _loweredPose.HeldPosition;
             Vector3 heldRot = _loweredPose.HeldRotation;
-            position = heldPos + Vector3.Scale(targetPos - heldPos, positionTravel);
-            rotation = heldRot + Vector3.Scale(targetRot - heldRot, rotationTravel);
+            position = heldPos + Vector3.Scale(targetPos - heldPos, RetentionTravel.Position(raising, _blend));
+            rotation = heldRot + Vector3.Scale(targetRot - heldRot, RetentionTravel.Rotation(raising, _blend));
         }
 
         private void UpdatePose(Player player)
@@ -361,15 +347,11 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 return;
             }
 
-            float eased = EasedBlend;
+            float eased = Mathf.SmoothStep(0f, 1f, _blend);
 
             // Re-evaluated every frame: picks up tweak slider and curve changes.
             GetTravelOffset(out Vector3 offsetPos, out Vector3 offsetRot);
-            if (!_loweredPose.TryEvaluate(offsetPos, offsetRot, out Vector3 pos, out Quaternion rot))
-            {
-                pos = _heldPosition;
-                rot = _heldRotation;
-            }
+            _loweredPose.Evaluate(offsetPos, offsetRot, out Vector3 pos, out Quaternion rot);
 
             _copy!.SetLocalPose(pos + CameraDriftCorrection(player) * eased, rot);
             if (!PluginConfig.RifleRetentionPreviewAwayPose.Value) // the real put-away isn't clamped either
@@ -399,11 +381,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             }
 
             // A fixed end pose, so it always ends out of view whatever the retained pose is tuned to.
-            if (!_loweredPose.TryEvaluate(RifleAwayPose.Position, RifleAwayPose.Rotation, out Vector3 awayPos, out Quaternion awayRot))
-            {
-                awayPos = _dismissFromPosition;
-                awayRot = _dismissFromRotation;
-            }
+            _loweredPose.Evaluate(RifleAwayPose.Position, RifleAwayPose.Rotation, out Vector3 awayPos, out Quaternion awayRot);
 
             float eased = Mathf.SmoothStep(0f, 1f, DismissProgress);
             _copy!.SetLocalPose(Vector3.Lerp(_dismissFromPosition, awayPos, eased),
@@ -515,21 +493,20 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _rifleSlot = rifleSlot;
             _stanceAtKeypress = Plugin.StanceControllerInstance?.CurrentStance;
             RifleRetentionDebug.Log($"stance at keypress: {_stanceAtKeypress?.StanceType.ToString() ?? "none"}");
-            RetentionSpace.TryGetLocalPose(heldBone, out _heldPosition, out _heldRotation);
+            RetentionSpace.TryGetLocalPose(heldBone, out Vector3 heldPosition, out Quaternion heldRotation);
             RetentionSpace.TryGetCameraPosition(out _cameraAtKeypress);
 
-            _copy = RetainedRifleCopy.Spawn(player, rifle, space, heldBone, _heldPosition, _heldRotation);
-            if (_copy == null)
+            _copy = RetainedRifleCopy.Spawn(player, rifle, space, heldBone, heldPosition, heldRotation);
+            if (_copy == null || !_loweredPose.Capture(space, heldBone))
             {
-                EndRetention("copy spawn failed");
+                EndRetention(_copy == null ? "copy spawn failed" : "pose capture failed");
                 return;
             }
             _anchorBone = _copy.AnchorBone;
-            _loweredPose.Capture(space, heldBone);
 
             _hider.Hide(player.HandsController?.ControllerGameObject);
             _blend = 0f;
-            _swapTimer = 0f;
+            _moveTimer = 0f;
             SetState(ERetentionState.Lowering, "keypress");
             UpdatePose(player);
 
@@ -554,11 +531,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             Player player = PlayerStateInstance.Player;
             if (player == null) return;
 
-            _swapTimer = 0f;
-            _realReadyTime = 0f;
-            _rifleBackInHands = false;
-            _realRifleReady = false;
-            _realPosedFrames = 0;
+            _moveTimer = 0f;
             SetState(ERetentionState.Raising, "keypress");
 
             _skipper.ArmSpawn(_rifle!);
@@ -602,6 +575,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _skipper.Disarm();
             _realRifleReady = false;
             _realPosedFrames = 0;
+            _realReadyTime = 0f;
             _pistolAppeared = false;
             _rifleBackInHands = false;
             _dismissElapsed = 0f;
@@ -610,16 +584,13 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _dismissFromCaptured = false;
             _leftHandReleased = false;
             _loweredPose.Reset();
-            _hider.RestoreAll();
-
-            _copy?.Destroy(PlayerStateInstance.Player);
-            _copy = null;
+            RemoveCopy();
 
             _rifle = null;
             _pistol = null;
             _stanceAtKeypress = null;
             _blend = 0f;
-            _swapTimer = 0f;
+            _moveTimer = 0f;
             SetState(ERetentionState.Idle, reason);
         }
 

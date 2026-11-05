@@ -230,33 +230,10 @@ namespace StanceOverhaul.Controllers
         public bool IsRetainingRifle => _rifleRetentionSystem != null && _rifleRetentionSystem.IsActive;
 
         /// <summary>
-        /// Rifle retention: put the weapon in <paramref name="stance"/> right now (null = no stance, at
-        /// rest). Sets the stance state with no enter/exit animation and snaps the stance/offset springs
-        /// onto their resting values, so nothing eases the weapon around after it appears. A rifle stance
-        /// is only applied once the rifle counts as a rifle again; until then the weapon is held at rest.
+        /// Rifle retention: put the weapon in <paramref name="stance"/> right now (null = no stance), with no
+        /// enter/exit animation. A rifle stance is only applied once the rifle counts as a rifle again;
+        /// until then the weapon is held at rest. The springs are not touched.
         /// </summary>
-        public void SnapStanceForRetention(IStance? stance)
-        {
-            SetStanceForRetention(stance);
-
-            StancePositionSpring.Zero = StancePosition + BaseWeaponOffsetPosition;
-            StanceRotationSpring.Zero = StanceRotation;
-            OffsetPositionSpring.Zero = DetailsOffsetPosition;
-            OffsetRotationSpring.Zero = DetailsOffsetRotation;
-
-            // Spring.Get() is Zero + Current and FixedUpdate pulls Current toward Zero, so the rest
-            // output is 2 * Zero. Current = 0 would pin the springs halfway and they would finish
-            // the travel after the reveal (logs: ~16mm / ~0.6deg of drift = the visible jerk).
-            foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring, OffsetPositionSpring, OffsetRotationSpring })
-            {
-                spring.Current = spring.Zero;
-                spring.Velocity = Vector3.zero;
-                spring.ForceAccumulator = Vector3.zero;
-                spring.ForceAccumulatorLimitless = Vector3.zero;
-            }
-        }
-
-        /// <summary>The stance state alone, leaving the springs free to settle.</summary>
         public void SetStanceForRetention(IStance? stance)
         {
             if (stance == null || WeaponStateInstance.TreatAsPistol)
@@ -279,14 +256,19 @@ namespace StanceOverhaul.Controllers
         /// <see cref="LoweredPoseSolver"/>. A spring rests at 2 * Zero, and that offset is relative to one
         /// base offset.
         /// </summary>
-        /// <param name="exact">Pin the springs on it. Otherwise they follow with their usual lag and settle.</param>
+        /// <param name="exact">
+        /// Pin every spring in place, so nothing eases the weapon around. Otherwise they follow with their
+        /// usual lag and settle.
+        /// </param>
         public void HoldAtStanceOffset(Vector3 position, Vector3 rotation, bool exact)
         {
             StancePositionSpring.Zero = (BaseWeaponOffsetPosition + position) / 2f;
             StanceRotationSpring.Zero = rotation / 2f;
             if (!exact) return;
 
-            foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring })
+            // Spring.Get() is Zero + Current and FixedUpdate pulls Current toward Zero, so the rest output is
+            // 2 * Zero. Current = 0 would pin the springs halfway and they would finish the travel later.
+            foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring, OffsetPositionSpring, OffsetRotationSpring })
             {
                 spring.Current = spring.Zero;
                 spring.Velocity = Vector3.zero;

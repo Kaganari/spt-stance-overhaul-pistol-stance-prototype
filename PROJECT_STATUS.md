@@ -66,7 +66,8 @@ keybind (default None; the user binds it to 6).
    - There is no "put the rifle away" animation.
 2. **Raising:** press the key again.
    - The pistol is holstered and the copy rises.
-   - The real rifle comes back with no draw animation, and the copy hands over to it seamlessly.
+   - The real rifle comes back hidden, with no draw animation. Once it has settled it replaces the copy
+     during the rise and finishes the rise in the hands.
 
 While the rifle is retained:
 - Two-handed weapon actions on the pistol are blocked, with a "Can't … one-handed" hint.
@@ -81,14 +82,16 @@ While the rifle is retained:
 
 | File | Role |
 |---|---|
-| `RifleRetentionSystem.cs` (519) | The `ISubSystem`. It owns the state machine (Idle → Lowering → Retained → Raising → Idle), the key and weapon-key handlers, the slot swaps, the action-policy table, and the static entry points the patches call. Every exit path goes through `EndRetention(reason)`. |
-| `RetainedRifleCopy.cs` (318) | The visual-only rifle model. Spawn (colliders and animator off), alignment to the held rifle's weapon bone, left-hand grip choice and IK/fingers, arm-reach clamp, FOV squash mirror, and Destroy, which returns the model to the pool cleanly. |
-| `LoweredPoseSolver.cs` (106) | Computes the lowered pose. It snapshots the hands-spring state at keypress, minus the current stance, and replays the game's spring math with a target offset passed in. It is re-evaluated every frame, so the sliders apply live. It knows nothing about stances. |
+| `RifleRetentionSystem.cs` (691) | The `ISubSystem`. It owns the state machine (Idle → Lowering → Retained → Raising → Rising → Idle), the key and weapon-key handlers, the slot swaps, the action-policy table, and the static entry points the patches call. Every exit path goes through `EndRetention(reason)`. |
+| `RetainedRifleCopy.cs` (386) | The visual-only rifle model. Spawn (colliders and animator off), alignment to the held rifle's weapon bone, left-hand grip choice and IK/fingers, arm-reach clamp, FOV squash mirror, and Destroy, which returns the model to the pool cleanly. |
+| `LoweredPoseSolver.cs` (113) | Computes the lowered pose. It snapshots the hands-spring state at keypress, minus the current stance, and replays the game's spring math with a target offset passed in. It is re-evaluated every frame, so the sliders apply live. It knows nothing about stances. |
 | `RetainedRiflePose.cs` (22) | The retained pose itself: retention's own base position/rotation (taken from Patrol's end values) plus the tweak sliders. Retuning a stance doesn't move it. |
 | `SwapAnimationSkipper.cs` (91) | Skips the put-away animation (on lowering) and the draw animation (on raising) for the one armed rifle, each within a time window (1.5 s and 4 s). The draw skip is deferred to the next Update and fires `OnAddAmmoInChamber` + `FastForward`. |
 | `RetentionActionPolicy.cs` (60) | `ERetentionAction`, `IRetentionActionPolicy` and `BlockActionPolicy` (shows the hint and blocks). Each action has its own policy entry, so its behavior can change later without touching the rest. |
 | `RetentionSpace.cs` (47) | The reference space for every pose: the camera's parent, not `Cam`, so freelook and recoil don't move the copy. |
-| `HeldWeaponHider.cs` (41) | Hides the real weapon's renderers while the copy stands in. Everything hidden **must** be restored, because weapon models are pooled. |
+| `HeldWeaponHider.cs` (58) | Hides the real weapon's renderers and lasers while the copy stands in. Everything hidden **must** be restored, because weapon models are pooled. |
+| `RetainedRifleMotion.cs` (206) | The rifle's own procedural motion while retained: its own hand and sway springs, continued from the rifle at keypress and driven by the game's processors from the body's movement. |
+| `RetentionTravel.cs` (40) | How far along each axis is, from the four `retention_` curves in `curves.json`, read live so the curve editor (F6, set in Realism Common Lib) works in game. |
 | `LeftArmIK.cs` (18) | Shared accessor for the left arm IK limb (`Player._limbs[0]`). |
 | `RifleRetentionDebug.cs` (130) | Logging gated by the Debug Logging toggle, with `T+<sec> f<frame>` timestamps since the last keypress and a per-frame trace. `Warn` always logs. |
 
@@ -97,6 +100,7 @@ While the rifle is retained:
 | Patch | Target | Purpose |
 |---|---|---|
 | `RetentionLeftHandIKPatch` | prefix `Player.IkProcess` | Keeps the left arm IK weight at 1 while the copy is shown. Otherwise the swap animations' LEFT_HAND_WEIGHT curve switches it off. |
+| `RetentionProcessEffectorsPatch` | postfix `ProceduralWeaponAnimation.ProcessEffectors` | Steps the rifle's own springs in the same fixed steps as the game's. |
 | `RetentionSkipRifleRemovePatch` | postfix `FirearmController.Remove.Start` | Runs `FastForward` on the armed rifle's put-away. |
 | `RetentionSkipRifleSpawnPatch` | postfix `SpawnOperation.Start` | Hides the armed rifle right away and queues the draw skip. |
 | `RetentionWeaponAppearedPatch` | postfix `SpawnOperation.WeaponAppeared` | Marks a real draw completion. Lowering → Retained waits on it, because RealismCommonLib's `WeaponIsReady` can be stale. |
@@ -107,16 +111,18 @@ While the rifle is retained:
 ### Shared files touched (~170 lines total)
 
 - **`StanceController`:** registers the subsystem and exposes `IsRetainingRifle`.
-  - `SnapStanceForRetention(stance)` holds the hidden rifle in the stance it was lowered from (or at rest)
-    while it rises, with the springs snapped. `AdoptStanceAfterRetention` hands that stance to the input
-    handler at the reveal.
+  - `SetStanceForRetention(stance)` puts the returning rifle in the stance it was lowered from (or at
+    rest) with no animation.
+  - `HoldAtStanceOffset(...)` holds it on the copy's path, called from `ZeroAdjustmentsPatch` through
+    `RifleRetentionSystem.OnStanceSpringsSet`. Pinned while hidden, free after the swap so it settles.
+  - `AdoptStanceAfterRetention` hands that stance to the input handler at the end of the raise.
 - **`StanceInputHandler`:** `AdoptStance()`, the only retention entry point into stance intent.
 - **`StanceState`:** `ClearImmediate()`, `EnterAtPoseImmediate()`, `IsHoldingAtPose()`.
 - **`PluginConfig`:** section 14, which has these entries:
   - Enable, Keybind
   - Patrol Pose Tweak position/rotation X/Y/Z
   - Rifle Lowering Speed
-  - three temporary raise-tuning sliders: Raising Speed, Raising Final Speed, Raising Hold Point
+  - four temporary raise-tuning sliders: Raise Speed, Raise Start Delay, Raise Swap Delay, Raise Copy Limit
   - Keep Rifle Within Arm Reach (advanced)
   - Debug Logging (advanced)
 - **`StanceInputEvents` / `StanceInputListener`:** the `ToggleRifleRetention` event and key.
@@ -144,20 +150,22 @@ While the rifle is retained:
 - **Busy rifle:** the key is ignored unless the rifle is drawn and idle (`IsDrawnAndIdle`), which is the
   same check raising uses. Pressing the key while aiming does nothing, and that is accepted.
 - **Raising handover:**
-  - The copy rises to a hold point while the pistol holsters.
-  - Once the real rifle has been drawn and idle for 2 frames, the copy retargets smoothly onto the real
-    rifle's live pose.
-  - The copy is revealed when within 4 mm / 1°, or after a 0.3 s timeout.
+  - The rifle starts rising after a delay, at one speed for the whole rise, so the pistol is away first.
+  - The hidden real rifle follows the copy's path through a stance offset.
+  - It is marked ready after 2 frames drawn and idle (~0.62 s). A ~5 mm step and a barrel roll of ~4 then
+    ~6 degrees follow for ~0.3 s, so the swap waits that long, hidden.
+  - The swap happens on the move, where what still differs can't be seen. The springs are freed there.
 - **Game frame order** (`Player.VisualPass`):
   `ProcessEffectors` (springs, camera) → `ShiftWeaponRoot` → `RotateHead` → `IkProcess` → `AdjustElbows`
   → `IkApply` → `LateTransformations`. The FOV coroutine runs later in LateUpdate.
 
 ### Findings worth remembering
 
-- On the first frame after `FastForward`, the weapon bone reports a junk pose. That is why the reveal is
-  gated on drawn + idle.
+- On the first frame after `FastForward`, the weapon bone reports a junk pose. That is why the swap is
+  gated on drawn + idle. Drawn + idle does not mean at rest: `IsIdling` only reads one animator layer.
 - The pistol's default stance (PistolCompress) exits with an animation that carries onto the rifle and
-  causes drift. That is what `SnapStanceForRetention` exists for.
+  causes drift. That is why the springs stay pinned until the swap.
+- Lasers (`LaserBeam`) draw themselves with `Graphics.DrawMesh`, so hiding renderers does not hide them.
 - The "hand holding air short of the handguard" bug was not an IK error. It was EFT's FOV compensation
   squashing the arms but not the copy.
 - **Weapon keys:**
