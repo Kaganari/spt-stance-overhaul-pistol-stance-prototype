@@ -249,13 +249,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _hider.Hide(handsController!.ControllerGameObject);
             _rifleBackInHands = true;
 
-            // Hold the hidden rifle still in the stance it was lowered from: no previous-weapon stance
-            // (PistolCompress) easing out on it, no enter animation, no spring tails. Logs showed
-            // ~4cm / 9deg of drift over ~0.45s without this.
-            var stances = Plugin.StanceControllerInstance;
-            if (stances != null && stances.AwakeRan)
-                stances.SnapStanceForRetention(_stanceAtKeypress);
-
             // Right after the fast-forward the animator is not posed yet and the weapon bone reports a
             // junk pose for a frame: only trust the real rifle after it has been drawn and idle for a bit.
             bool posed = PlayerStateInstance.WeaponIsReady && IsDrawnAndIdle(handsController);
@@ -264,15 +257,27 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _realRifleReady = _realPosedFrames >= REAL_POSE_MIN_FRAMES;
             if (_realRifleReady && !wasReady)
                 RifleRetentionDebug.Log($"real rifle trusted after {_realPosedFrames} posed frames");
-            if (!_realRifleReady) return true;
+            if (_realRifleReady)
+            {
+                // Its animator is still kicking in here: a ~5mm step, then the barrel roll, in logs.
+                // Hidden for now, so the swap doesn't show them.
+                _realReadyTime += deltaTime;
+                if (_realReadyTime >= PluginConfig.RifleRetentionRaiseSwapDelay.Value)
+                {
+                    SwapToRealRifle();
+                    return false;
+                }
+            }
 
-            // Its animator is still kicking in here: a ~5mm step, then the barrel roll, in logs. Hidden
-            // for now, so the swap doesn't show them.
-            _realReadyTime += deltaTime;
-            if (_realReadyTime < PluginConfig.RifleRetentionRaiseSwapDelay.Value) return true;
-
-            SwapToRealRifle();
-            return false;
+            // Not on the swap frame: this puts the springs at rest for the frame, and from the swap on
+            // nothing pins them back onto the rifle's travel, so it would jump (~2cm / 5deg in logs).
+            // Hold the hidden rifle still in the stance it was lowered from: no previous-weapon stance
+            // (PistolCompress) easing out on it, no enter animation, no spring tails. Logs showed
+            // ~4cm / 9deg of drift over ~0.45s without this.
+            var stances = Plugin.StanceControllerInstance;
+            if (stances != null && stances.AwakeRan)
+                stances.SnapStanceForRetention(_stanceAtKeypress);
+            return true;
         }
 
         /// <summary>
@@ -299,11 +304,11 @@ namespace StanceOverhaul.SubSystem.RifleRetention
                 return;
             }
 
-            // Stays in the stance it was lowered from at the end of the travel: no easing out of the
-            // previous weapon's stance on it, no enter animation, no spring tails.
+            // In the stance it was lowered from: no easing out of the previous weapon's stance on it, no
+            // enter animation. Its springs are free from here on, so it lags and settles like any weapon.
             var stances = Plugin.StanceControllerInstance;
             if (stances != null && stances.AwakeRan)
-                stances.SnapStanceForRetention(_stanceAtKeypress);
+                stances.SetStanceForRetention(_stanceAtKeypress);
 
             Rise(0f, deltaTime);
             if (RifleRetentionDebug.Enabled)
@@ -323,6 +328,31 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private float EasedBlend => Mathf.SmoothStep(0f, 1f, _blend);
 
+        /// <summary>
+        /// Where the rifle is along its travel, as a stance offset. Copy and real rifle both follow this,
+        /// so the copy can be swapped for the real one anywhere along the way.
+        /// </summary>
+        private void GetTravelOffset(out Vector3 position, out Vector3 rotation)
+        {
+            // TEMP (tuning): the preview toggle holds the rifle at the away pose instead.
+            bool preview = PluginConfig.RifleRetentionPreviewAwayPose.Value;
+            Vector3 targetPos = preview ? RifleAwayPose.Position : RetainedRiflePose.Position;
+            Vector3 targetRot = preview ? RifleAwayPose.Rotation : RetainedRiflePose.Rotation;
+
+            bool raising = _state == ERetentionState.Raising || _state == ERetentionState.Rising;
+            Vector3 positionTravel = raising
+                ? RetentionTravel.Raising("retention_raise_position", _blend)
+                : RetentionTravel.Lowering("retention_lower_position", _blend);
+            Vector3 rotationTravel = raising
+                ? RetentionTravel.Raising("retention_raise_rotation", _blend)
+                : RetentionTravel.Lowering("retention_lower_rotation", _blend);
+
+            Vector3 heldPos = _loweredPose.HeldPosition;
+            Vector3 heldRot = _loweredPose.HeldRotation;
+            position = heldPos + Vector3.Scale(targetPos - heldPos, positionTravel);
+            rotation = heldRot + Vector3.Scale(targetRot - heldRot, rotationTravel);
+        }
+
         private void UpdatePose(Player player)
         {
             if (_state == ERetentionState.Dismissing)
@@ -333,15 +363,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
             float eased = EasedBlend;
 
-            // Re-evaluated every frame: picks up tweak slider changes.
-            // TEMP (tuning): the preview toggle holds the rifle at the away pose instead.
-            bool preview = PluginConfig.RifleRetentionPreviewAwayPose.Value;
-            Vector3 targetPos = preview ? RifleAwayPose.Position : RetainedRiflePose.Position;
-            Vector3 targetRot = preview ? RifleAwayPose.Rotation : RetainedRiflePose.Rotation;
-            // Blends the offset, not the resulting poses: the real rifle takes the same path, so the copy
-            // can be swapped for it anywhere along the way.
-            Vector3 offsetPos = Vector3.Lerp(_loweredPose.HeldPosition, targetPos, eased);
-            Vector3 offsetRot = Vector3.Lerp(_loweredPose.HeldRotation, targetRot, eased);
+            // Re-evaluated every frame: picks up tweak slider and curve changes.
+            GetTravelOffset(out Vector3 offsetPos, out Vector3 offsetRot);
             if (!_loweredPose.TryEvaluate(offsetPos, offsetRot, out Vector3 pos, out Quaternion rot))
             {
                 pos = _heldPosition;
@@ -611,10 +634,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             RifleRetentionSystem? system = _instance;
             if (system == null || !system._rifleBackInHands) return;
 
-            float eased = system.EasedBlend;
-            Plugin.StanceControllerInstance?.HoldAtStanceOffset(
-                Vector3.Lerp(system._loweredPose.HeldPosition, RetainedRiflePose.Position, eased),
-                Vector3.Lerp(system._loweredPose.HeldRotation, RetainedRiflePose.Rotation, eased));
+            system.GetTravelOffset(out Vector3 position, out Vector3 rotation);
+            Plugin.StanceControllerInstance?.HoldAtStanceOffset(position, rotation, exact: system._state == ERetentionState.Raising);
         }
 
         /// <summary>ProcessEffectors postfix: the game moved its springs, the rifle's own move in step.</summary>

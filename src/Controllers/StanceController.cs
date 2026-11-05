@@ -237,10 +237,7 @@ namespace StanceOverhaul.Controllers
         /// </summary>
         public void SnapStanceForRetention(IStance? stance)
         {
-            if (stance == null || WeaponStateInstance.TreatAsPistol)
-                _stanceState.ClearImmediate();
-            else if (!_stanceState.IsHoldingAtPose(stance))
-                _stanceState.EnterAtPoseImmediate(stance);
+            SetStanceForRetention(stance);
 
             StancePositionSpring.Zero = StancePosition + BaseWeaponOffsetPosition;
             StanceRotationSpring.Zero = StanceRotation;
@@ -259,6 +256,15 @@ namespace StanceOverhaul.Controllers
             }
         }
 
+        /// <summary>The stance state alone, leaving the springs free to settle.</summary>
+        public void SetStanceForRetention(IStance? stance)
+        {
+            if (stance == null || WeaponStateInstance.TreatAsPistol)
+                _stanceState.ClearImmediate();
+            else if (!_stanceState.IsHoldingAtPose(stance))
+                _stanceState.EnterAtPoseImmediate(stance);
+        }
+
         /// <summary>
         /// Rifle retention, once the real rifle is back: make <paramref name="stance"/> the player's chosen
         /// stance, so the stance input handler keeps it instead of resetting to the default.
@@ -273,10 +279,12 @@ namespace StanceOverhaul.Controllers
         /// <see cref="LoweredPoseSolver"/>. A spring rests at 2 * Zero, and that offset is relative to one
         /// base offset.
         /// </summary>
-        public void HoldAtStanceOffset(Vector3 position, Vector3 rotation)
+        /// <param name="exact">Pin the springs on it. Otherwise they follow with their usual lag and settle.</param>
+        public void HoldAtStanceOffset(Vector3 position, Vector3 rotation, bool exact)
         {
             StancePositionSpring.Zero = (BaseWeaponOffsetPosition + position) / 2f;
             StanceRotationSpring.Zero = rotation / 2f;
+            if (!exact) return;
 
             foreach (Spring spring in new[] { StancePositionSpring, StanceRotationSpring })
             {
