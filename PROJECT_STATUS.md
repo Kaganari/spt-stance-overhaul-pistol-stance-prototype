@@ -78,24 +78,25 @@ While the rifle is retained:
 
 ## 3. Code layout
 
-### `src/SubSystem/RifleRetention/` — the feature (~1330 lines)
+### `src/SubSystem/RifleRetention/` — the feature (~1910 lines)
 
 | File | Role |
 |---|---|
-| `RifleRetentionSystem.cs` (691) | The `ISubSystem`. It owns the state machine (Idle → Lowering → Retained → Raising → Rising → Idle), the key and weapon-key handlers, the slot swaps, the action-policy table, and the static entry points the patches call. Every exit path goes through `EndRetention(reason)`. |
-| `RetainedRifleCopy.cs` (386) | The visual-only rifle model. Spawn (colliders and animator off), alignment to the held rifle's weapon bone, left-hand grip choice and IK/fingers, arm-reach clamp, FOV squash mirror, and Destroy, which returns the model to the pool cleanly. |
-| `LoweredPoseSolver.cs` (113) | Computes the lowered pose. It snapshots the hands-spring state at keypress, minus the current stance, and replays the game's spring math with a target offset passed in. It is re-evaluated every frame, so the sliders apply live. It knows nothing about stances. |
+| `RifleRetentionSystem.cs` (629) | The `ISubSystem`. It owns the state machine (Idle → Lowering → Retained → Raising → Rising → Idle), the key and weapon-key handlers, the slot swaps, the action-policy table, and the static entry points the patches call. Every exit path goes through `EndRetention(reason)`. |
+| `RetainedRifleCopy.cs` (371) | The visual-only rifle model. Spawn (colliders and animator off), alignment to the held rifle's weapon bone, left-hand grip choice and IK/fingers, arm-reach clamp, FOV squash mirror, and Destroy, which returns the model to the pool cleanly. |
+| `RiflePoseSolver.cs` (113) | Computes where the rifle sits for any stance offset. It snapshots the hands-spring state at keypress, minus the current stance, and replays the game's spring math with a target offset passed in. It is re-evaluated every frame, so the sliders apply live. It knows nothing about stances. |
+| `RifleDismissal.cs` (83) | Putting the retained rifle away on a weapon key: to `RifleAwayPose`, hide, let go. One instance per dismissal. |
 | `RetainedRiflePose.cs` (22) | The retained pose itself: retention's own base position/rotation (taken from Patrol's end values) plus the tweak sliders. Retuning a stance doesn't move it. |
 | `SwapAnimationSkipper.cs` (91) | Skips the put-away animation (on lowering) and the draw animation (on raising) for the one armed rifle, each within a time window (1.5 s and 4 s). The draw skip is deferred to the next Update and fires `OnAddAmmoInChamber` + `FastForward`. |
 | `RetentionActionPolicy.cs` (60) | `ERetentionAction`, `IRetentionActionPolicy` and `BlockActionPolicy` (shows the hint and blocks). Each action has its own policy entry, so its behavior can change later without touching the rest. |
-| `RetentionSpace.cs` (47) | The reference space for every pose: the camera's parent, not `Cam`, so freelook and recoil don't move the copy. |
-| `HeldWeaponHider.cs` (58) | Hides the real weapon's renderers and lasers while the copy stands in. Everything hidden **must** be restored, because weapon models are pooled. |
+| `RetentionSpace.cs` (56) | The reference space for every pose: the camera's parent, not `Cam`, so freelook and recoil don't move the copy. |
+| `HeldWeaponHider.cs` (57) | Hides the real weapon's renderers and lasers while the copy stands in. Everything hidden **must** be restored, because weapon models are pooled. |
 | `RetainedRifleMotion.cs` (206) | The rifle's own procedural motion while retained: its own hand and sway springs, continued from the rifle at keypress and driven by the game's processors from the body's movement. |
-| `RetentionTravel.cs` (40) | How far along each axis is, from the four `retention_` curves in `curves.json`, read live so the curve editor (F6, set in Realism Common Lib) works in game. |
-| `LeftArmIK.cs` (18) | Shared accessor for the left arm IK limb (`Player._limbs[0]`). |
-| `RifleRetentionDebug.cs` (130) | Logging gated by the Debug Logging toggle, with `T+<sec> f<frame>` timestamps since the last keypress and a per-frame trace. `Warn` always logs. |
+| `RetentionTravel.cs` (38) | How far along each axis is, from the four `retention_` curves in `curves.json`, read live so the curve editor (F6, set in Realism Common Lib) works in game. |
+| `LeftArmIK.cs` (19) | Shared accessor for the left arm IK limb (`Player._limbs[0]`). |
+| `RifleRetentionDebug.cs` (139) | Logging gated by the Debug Logging toggle, with `T+<sec> f<frame>` timestamps since the last keypress and a per-frame trace. `Warn` always logs. |
 
-### `src/Patches/RifleRetentionPatches.cs` (216) — Harmony patches, registered in `src/Plugin.cs`
+### `src/Patches/RifleRetentionPatches.cs` (241) — Harmony patches, registered in `src/Plugin.cs`
 
 | Patch | Target | Purpose |
 |---|---|---|
@@ -120,7 +121,7 @@ While the rifle is retained:
 - **`StanceState`:** `ClearImmediate()`, `EnterAtPoseImmediate()`, `IsHoldingAtPose()`.
 - **`PluginConfig`:** section 14, which has these entries:
   - Enable, Keybind
-  - Patrol Pose Tweak position/rotation X/Y/Z
+  - Retained Pose Tweak position/rotation X/Y/Z
   - Rifle Lowering Speed
   - four temporary raise-tuning sliders: Raise Speed, Raise Start Delay, Raise Swap Delay, Raise Copy Limit
   - Keep Rifle Within Arm Reach (advanced)

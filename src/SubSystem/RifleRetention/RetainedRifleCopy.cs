@@ -30,7 +30,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private Transform? _fovSpace;
         private bool _fovSquashed;
-        private bool _fovLogged;
 
         public Transform Anchor => _anchor.transform;
         public ECharacterWeaponBones AnchorBone { get; }
@@ -113,7 +112,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             Singleton<BetterAudio>.Instance.PlayNonspatial(clip, BetterAudio.AudioSourceGroupType.Weaponry, 0f, sound!.Volume);
         }
 
-        /// <summary>Hides the model (renderers only): the left hand can still hold its grip point.</summary>
+        /// <summary>Hides the model, nothing more: the left hand can still hold its grip point.</summary>
         public void HideModel()
         {
             _modelHider.Hide(_model);
@@ -305,12 +304,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             _anchor.transform.SetParent(_fovSpace, true);
             _fovSpace.localScale = new Vector3(1f, 1f, scale);
             _fovSquashed = true;
-
-            if (!_fovLogged)
-            {
-                RifleRetentionDebug.Log($"FOV squash mirrored on copy: ribcage z-scale={scale:F3}");
-                _fovLogged = true;
-            }
         }
 
         /// <summary>
@@ -343,15 +336,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             UndoFovSquash(); // the anchor must be back in retention space before it is torn down
 
             if (player != null)
-            {
-                if (LeftGrip != null && player.LeftHandInteractionTarget == LeftGrip)
-                {
-                    player.LeftHandInteractionTarget = null;
-                    player.ThirdIkWeight.Value = 0f;
-                }
-                if (_fingersMapped && player.HandPosers != null && player.HandPosers.Length > 0)
-                    player.HandPosers[0].MapIkPalm(null);
-            }
+                ReleaseLeftHand(player, 0f);
 
             if (_fallbackGripGO != null)
                 UnityEngine.Object.Destroy(_fallbackGripGO);

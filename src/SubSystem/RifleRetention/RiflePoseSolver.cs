@@ -15,7 +15,7 @@ namespace StanceOverhaul.SubSystem.RifleRetention
     /// Every evaluation also adds the rifle's own procedural motion (<see cref="RetainedRifleMotion"/>), so
     /// it moves by itself rather than hanging still.
     /// </summary>
-    internal class LoweredPoseSolver
+    internal class RiflePoseSolver
     {
         // Set by Capture, which must have succeeded before anything is evaluated.
         private RetainedRifleMotion? _motion;

@@ -253,7 +253,7 @@ namespace StanceOverhaul.Controllers
 
         /// <summary>
         /// Rifle retention: holds the weapon in hands at a stance offset, in the terms of
-        /// <see cref="LoweredPoseSolver"/>. A spring rests at 2 * Zero, and that offset is relative to one
+        /// <see cref="RiflePoseSolver"/>. A spring rests at 2 * Zero, and that offset is relative to one
         /// base offset.
         /// </summary>
         /// <param name="exact">

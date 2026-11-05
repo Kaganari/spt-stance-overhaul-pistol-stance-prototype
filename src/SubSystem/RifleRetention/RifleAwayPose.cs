@@ -4,10 +4,10 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 {
     /// <summary>
     /// Where the retained rifle goes when it is put away (switching fully to the pistol, or to another
-    /// weapon): lowered, twisted and moved a bit to the left side, out of view, the left hand still on it. A fixed pose, as a stance
-    /// offset like <see cref="RetainedRiflePose"/>, not an offset from it: wherever the retained pose is
-    /// tuned to, the rifle always ends out of view before the copy is removed. The away tweak sliders are
-    /// added on top.
+    /// weapon): lowered, twisted and moved a bit to the left side, out of view, the left hand still on it.
+    /// A fixed pose, as a stance offset like <see cref="RetainedRiflePose"/>, not an offset from it: wherever
+    /// the retained pose is tuned to, the rifle always ends out of view before the copy is removed. The away
+    /// tweak sliders are added on top.
     /// </summary>
     internal static class RifleAwayPose
     {

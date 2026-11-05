@@ -87,8 +87,8 @@ namespace StanceOverhaul.Patches
     }
 
     /// <summary>
-    /// Switching back: skips the rifle's draw animation. The retained copy has already shown the rifle
-    /// coming up, so the real rifle should just be there.
+    /// Switching back: skips the rifle's draw animation. The rifle rises from the retained pose instead,
+    /// so its draw would only fight that.
     /// </summary>
     public class RetentionSkipRifleSpawnPatch : ModulePatch
     {

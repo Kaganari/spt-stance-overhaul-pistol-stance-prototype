@@ -17,6 +17,6 @@ namespace StanceOverhaul.SubSystem.RifleRetention
             PluginConfig.RifleRetentionPosX.Value, PluginConfig.RifleRetentionPosY.Value, PluginConfig.RifleRetentionPosZ.Value);
 
         public static Vector3 Rotation => BaseRotation + new Vector3(
-            PluginConfig.RifleRetentionPitch.Value, PluginConfig.RifleRetentionYaw.Value, PluginConfig.RifleRetentionRoll.Value);
+            PluginConfig.RifleRetentionRotX.Value, PluginConfig.RifleRetentionRotY.Value, PluginConfig.RifleRetentionRotZ.Value);
     }
 }

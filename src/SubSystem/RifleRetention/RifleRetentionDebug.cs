@@ -64,6 +64,15 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 
         private static float Wrap(float angle) => angle > 180f ? angle - 360f : angle;
 
+        /// <summary>The gap the swap has to hide: copy to real rifle, at the moment one replaces the other.</summary>
+        public static void LogSwapGap(Transform copyAnchor, ECharacterWeaponBones anchorBone)
+        {
+            if (!Enabled || !RetentionSpace.TryGetLocalPose(RetentionSpace.HeldWeaponBone(anchorBone), out Vector3 realPos, out Quaternion realRot))
+                return;
+
+            Log($"swap gap: {Vector3.Distance(copyAnchor.localPosition, realPos) * 1000f:F1}mm/{Quaternion.Angle(copyAnchor.localRotation, realRot):F2}deg");
+        }
+
         /// <summary>
         /// One line with everything that can move the real rifle: hands controller and its current operation,
         /// animator idle state, the real weapon bone pose in retention space and its per-frame movement, the

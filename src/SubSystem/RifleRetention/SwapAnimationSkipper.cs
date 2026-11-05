@@ -7,8 +7,8 @@ namespace StanceOverhaul.SubSystem.RifleRetention
 {
     /// <summary>
     /// Skips the game's own animations for the rifle being retained: "put the rifle away" when lowering, so
-    /// the pistol draw starts immediately, and the rifle draw when raising, since the copy already showed the
-    /// rifle coming up. Each skip is armed for one weapon right before the slot request and only fires
+    /// the pistol draw starts immediately, and the rifle draw when raising, since the rifle rises from the
+    /// retained pose instead. Each skip is armed for one weapon right before the slot request and only fires
     /// within its window, so any other swap plays normally.
     /// </summary>
     internal class SwapAnimationSkipper
